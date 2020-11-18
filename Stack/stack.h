@@ -169,15 +169,17 @@ int push(struct stack_t* stack, void* val)
         printf("Invalid stack pointer in push\n");
         return -1;
     }
+
     assert (timeout_flag == -1); //do immidiately
+    sem_wait(stack->flag);
 
     if (get_count(stack) == get_size(stack))
     {
         printf("stack is full (size is %d), can't push\n", get_size(stack));
+        sem_post(stack->flag);
         return -1;
     }
-
-    sem_wait(stack->flag);
+    
     stack->memory[get_count(stack)] = val;
     sem_post(stack->count);
     sem_post(stack->flag);
@@ -194,14 +196,15 @@ int pop(struct stack_t* stack, void** val)
     }
 
     assert(timeout_flag == -1); //do immidiately
+    sem_wait(stack->flag);
 
     if (get_count(stack) == 0)
     {
         printf("stack is empty, can't pop\n");
+        sem_post(stack->flag);
         return -1;
     }
-
-    sem_wait(stack->flag);
+    
     sem_wait(stack->count);
     *val = stack->memory[get_count(stack)]; 
     sem_post(stack->flag);
