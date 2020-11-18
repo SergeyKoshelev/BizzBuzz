@@ -1,21 +1,11 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/shm.h>
-#include <assert.h>
 #include "stack.h"
-#include <semaphore.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <time.h>
 
 //using constants push_count, fork_count and size create your own test
 //every process do push_count pushes and pops in stack
 
 const int size = 100000;
 const char* path = "/home/sergey/stack/gen";
-const int push_count = 20;
+const int push_count = 10;
 const int fork_count = 10;
 
 int main(int argc, char** argv)
@@ -32,6 +22,7 @@ int main(int argc, char** argv)
     
     clear_key(key, size);
     pid_t main_pid = getpid();
+    //printf("main pid: %d\n", main_pid);
 
     struct stack_t* stack;
     pid_t pid;
@@ -42,23 +33,17 @@ int main(int argc, char** argv)
         stack = attach_stack(key, size);
         assert(stack != NULL);
     
-        for (int i = 0; i < push_count; i++)
+        for (int j = 0; j < push_count; j++)
         {
-            void* a = NULL + i + pid * 5;
+            void* a = NULL + j + pid * 5;
             int check = push(stack, a);
-            if (check == 0) 
-            {
-                //printf("pushed: %p\n", a);
-            }    
+            //if (check == 0) { printf("pushed %p by pid %d\n", a, getpid());}    
         }
-        for (int i = 0; i < push_count; i++)
+        for (int j = 0; j < push_count; j++)
         {
             void* a;
             int check = pop(stack, &a);
-            if (check == 0)
-            { 
-                //printf("popped: %p\n", a);
-            }    
+            //if (check == 0) { printf("popped %p by pid %d\n", a, getpid()); }    
         }
         //printf("stack count: %d\n", get_count(stack));
     }
@@ -73,7 +58,7 @@ int main(int argc, char** argv)
     }
     else
     {
-        //printf("end of the child\n");
+        //printf("end of the child with pid %d\n", getpid());
         detach_stack(stack);
     }
 }

@@ -1,17 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/shm.h>
-#include <assert.h>
 #include "stack.h"
-#include <semaphore.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <time.h>
-
-//simplest program with 1 process
-//it push size+1 elems and than pop size+1 elems
 
 const int size = 30;
 

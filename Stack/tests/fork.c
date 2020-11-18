@@ -1,14 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/shm.h>
-#include <assert.h>
 #include "stack.h"
-#include <semaphore.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <time.h>
 
 //program with 2 processes
 //the first push size+1 elems, than the second pop size+1 elems
