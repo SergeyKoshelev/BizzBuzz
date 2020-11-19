@@ -62,7 +62,7 @@ struct stack_t* attach_stack(key_t key, int size)
         memory = shmat(shmem_id, NULL, 0);
         assert(memory != NULL);
 
-        sem_id = semget(key, 2, IPC_CREAT | O_RDWR | 0666);
+        sem_id = semget(key, 2, IPC_CREAT | IPC_EXCL | 0666);
         //my_errno = errno;
         //printf("%d %d\n", my_errno, EEXIST);
         if ((errno == EEXIST)|| (sem_id <= 0))
@@ -130,7 +130,11 @@ int get_count(struct stack_t* stack)
     else
     {
         int val = semctl(stack->sem_id, SEM_COUNT, GETVAL);
-        assert(val >= 0);
+        if (errno == EIDRM)
+        {
+            printf("finished because semaphores were removed\n");
+            exit(1);
+        }
         return val;
     }
 }
@@ -228,6 +232,8 @@ int sem_change(int sem_id, int sem_num, int val)
         sems.sem_flg = 0;
         return semop(sem_id, &sems, 1);
     }
+
+    
     else if (sem_num == SEM_FLAG) //change flag
     {
         if (timeout_flag == -1) //no wait, do immediately
