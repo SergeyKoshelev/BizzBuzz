@@ -8,16 +8,7 @@ const char* path = "/home/sergey/stack/stack.txt";
 
 int main(int argc, char** argv)
 {
-    key_t key;
-    if (argc == 1)
-    {
-        key_t key = ftok(path, 100);    
-    }
-    else
-    {
-        key = atoi(argv[1]);
-    }
-
+    key_t key = rand_key_gen (argc, argv);
     clear_key(key, size);
     
     pid_t pid = fork();
@@ -28,15 +19,13 @@ int main(int argc, char** argv)
     {
         void* a = NULL + i + pid * 5;
         int check = push(stack, a);
-        if (check == 0) 
-            printf("pushed: %p\n", a);    
+        //if (check == 0) printf("pushed: %p\n", a);    
     }
     for (int i = 0; i < size/2; i++)
     {
         void* a;
         int check = pop(stack, &a);
-        if (check == 0) 
-            printf("popped: %p\n", a);    
+        //if (check == 0) printf("popped: %p\n", a);    
     }
 
     if (pid != 0)

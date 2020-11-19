@@ -20,7 +20,7 @@ void print_sem(int sem_id, int sem_num)
     if (val == -1)
         printf("Invalid semaphore in print_sem\n");
     else
-        pritnf("value of %d sem: %d\n", sem_num, val);
+        printf("value of %d sem: %d\n", sem_num, val);
     
 }
 
@@ -41,7 +41,7 @@ struct stack_t* attach_stack(key_t key, int size)
         assert(memory != NULL);
 
         sem_id = semget(key, 2, IPC_EXCL | 0666);
-        if ((errno == ENOENT) || (sem_id <= 0))
+        if (sem_id <= 0) // errno == ENOENT
         {
             printf("can't attach to existing semaphore count\n");
             free(stack);
@@ -57,14 +57,14 @@ struct stack_t* attach_stack(key_t key, int size)
     else  //create new 
     {
         //printf("creating new stack\n");
-        shmem_id = shmget(key, size, IPC_CREAT | 0666);
+        shmem_id = shmget(key, size, IPC_CREAT | IPC_EXCL | 0666);
         assert(shmem_id > 0);
         memory = shmat(shmem_id, NULL, 0);
         assert(memory != NULL);
-        //printf("new memory %p\n", memory);
 
-        //printf("key_count = %s\n", key_count);
-        sem_id = semget(key, 2, IPC_CREAT | 0666);
+        sem_id = semget(key, 2, IPC_CREAT | O_RDWR | 0666);
+        //my_errno = errno;
+        //printf("%d %d\n", my_errno, EEXIST);
         if ((errno == EEXIST)|| (sem_id <= 0))
         {
             printf("can't create new semaphore count\n");
@@ -83,7 +83,6 @@ struct stack_t* attach_stack(key_t key, int size)
     return stack;
 }
 
-//not done
 int detach_stack(struct stack_t* stack)
 {
     if (stack == NULL)
@@ -95,14 +94,9 @@ int detach_stack(struct stack_t* stack)
     {
         int check = shmdt(stack->memory);
         assert (check >= 0);
-        check = sem_close(stack->count);
-        assert(check >= 0);
-        check = sem_close(stack->flag);
-        assert(check >= 0);
     }
 }
 
-//not done
 int mark_destruct(struct stack_t* stack)
 {
     if (stack == NULL)
@@ -115,12 +109,8 @@ int mark_destruct(struct stack_t* stack)
         //printf("destructing sems and shmem\n");
         int check = shmctl(stack->shmem_id, IPC_RMID, NULL);
         assert(check == 0);
-        check = sem_unlink(key_count);
+        check = semctl(stack->sem_id, 0, IPC_RMID);
         assert(check == 0);
-        check = sem_unlink(key_flag);
-        assert(check == 0);
-        free(key_count);
-        free(key_flag);
         return 0;
     }
 }
@@ -145,7 +135,6 @@ int get_count(struct stack_t* stack)
     }
 }
 
-//not done
 int push(struct stack_t* stack, void* val)
 {
     if (stack == NULL)
@@ -154,41 +143,24 @@ int push(struct stack_t* stack, void* val)
         return -1;
     }
 
-    if (timeout_flag == 0) //wait infinitely
-        sem_wait(stack->flag);
-    else if (timeout_flag == -1) //try immediately
+    int check = sem_change(stack->sem_id, SEM_FLAG, -1);
+    if (check == 0)
     {
-        sem_trywait(stack->flag);
-        if (errno == EAGAIN)
+        if (get_count(stack) >= get_size(stack))
         {
-            //printf("cant't trywait\n");
-            return -1;            }
-        }
-    else if (timeout_flag == -1) //wait time
-    {
-        sem_timedwait(stack->flag, &timeout_time);
-        if (errno == ETIMEDOUT)
-        {
-            //printf("cant't timedwait\n");
+            printf("stack is full (size is %d), can't push\n", get_size(stack));
+            sem_change(stack->sem_id, SEM_FLAG, 1);
             return -1;
         }
-    }
-
-    //printf("count = %d  size = %d\n", get_count(stack), get_size(stack));
-    if (get_count(stack) >= get_size(stack))
-    {
-        printf("stack is full (size is %d), can't push\n", get_size(stack));
-        sem_post(stack->flag);
-        return -1;
-    }
     
-    stack->memory[get_count(stack)] = val;
-    sem_post(stack->count);
-    sem_post(stack->flag);
-    return 0;
+        stack->memory[get_count(stack)] = val;
+        sem_change(stack->sem_id, SEM_COUNT, 1);
+        sem_change(stack->sem_id, SEM_FLAG, 1);
+        return 0;
+    }
+    return check;
 }
 
-//not done
 int pop(struct stack_t* stack, void** val)
 {
     if (stack == NULL)
@@ -197,38 +169,23 @@ int pop(struct stack_t* stack, void** val)
         return -1;
     }
 
-    if (timeout_flag == 0) //wait infinitely
-        sem_wait(stack->flag);
-    else if (timeout_flag == -1) //try immediately
+    int check = sem_change(stack->sem_id, SEM_FLAG, -1);
+    if (check == 0)
     {
-        sem_trywait(stack->flag);
-        if (errno == EAGAIN)
+        if (get_count(stack) == 0)
         {
-            //printf("cant't trywait\n");
+            printf("stack is empty, can't pop\n");
+            sem_change(stack->sem_id, SEM_FLAG, 1);
             return -1;
         }
-    }
-    else if (timeout_flag == -1) //wait time
-    {
-        sem_timedwait(stack->flag, &timeout_time);
-        if (errno == ETIMEDOUT)
-        {
-            //printf("cant't timedwait\n");
-            return -1;
-        }
+
+        *val = stack->memory[get_count(stack) - 1];
+        sem_change(stack->sem_id, SEM_COUNT, -1);
+        sem_change(stack->sem_id, SEM_FLAG, 1);
+        return 0; 
     }
 
-    if (get_count(stack) == 0)
-    {
-        printf("stack is empty, can't pop\n");
-        sem_post(stack->flag);
-        return -1;
-    }
-    
-    sem_wait(stack->count);
-    *val = stack->memory[get_count(stack)]; 
-    sem_post(stack->flag);
-    return 0; 
+    return check;    
 }
 
 int set_wait(int val, struct timespec* timeout)
@@ -259,18 +216,46 @@ key_t rand_key_gen(int argc, char** argv)
         return atoi(argv[1]);
 }
 
-//not done
 int sem_change(int sem_id, int sem_num, int val)
 {
+    int res;
     struct sembuf sems;
     sems.sem_num = sem_num;
     sems.sem_op = val;
 
     if (sem_num == SEM_COUNT) //change count
-        semop(sem_id, &sems, 1);
+    {
+        sems.sem_flg = 0;
+        return semop(sem_id, &sems, 1);
+    }
     else if (sem_num == SEM_FLAG) //change flag
     {
-        
+        if (timeout_flag == -1) //no wait, do immediately
+        {
+            sems.sem_flg = IPC_NOWAIT | SEM_UNDO;
+            res = semop(sem_id, &sems, 1);
+            //if (res == -1) /*if (errno == EAGAIN)*/ printf("So fast, sem is not ready\n");
+            return res; 
+        }
+        else if (timeout_flag == 0) //wait inifinity time
+        {
+            sems.sem_flg = SEM_UNDO;
+            res = semop(sem_id, &sems, 1);
+            //if (res == -1) printf("ERROR sem_change 0\n");
+            return res; 
+        }
+        else if (timeout_flag == 1) //wait only timeout time
+        {
+            sems.sem_flg = SEM_UNDO;
+            res = semtimedop(sem_id, &sems, 1, &timeout_time);
+            if (res == -1) /* if (errno == EAGAIN) */ printf("Not enough time for sem_change\n");
+            return res; 
+        } 
+        else 
+        {
+            printf("Invalid timeout_flag in sem_change\n");
+            return -1;
+        }
     }
     else
     {

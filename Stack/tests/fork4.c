@@ -7,7 +7,7 @@ const int size = 10;
 
 int main(int argc, char** argv)
 {
-    key_t key = atoi(argv[1]);
+    key_t key = rand_key_gen (argc, argv);
     pid_t pid = fork();
 
     struct stack_t* stack;
@@ -17,7 +17,7 @@ int main(int argc, char** argv)
     if (pid != 0)
     {
         sleep(1);
-        stack = attach_stack(key, size);
+        stack = attach_stack(key, size * 2);
         assert(stack != NULL);
         for (int i = 0; i < size; i++)
         {
@@ -28,7 +28,7 @@ int main(int argc, char** argv)
 
     if (pid == 0)
     {
-        stack = attach_stack(key, size * 2);
+        stack = attach_stack(key, size);
         assert(stack != NULL);
         for (int i = 0; i < size * 2; i++)
         {

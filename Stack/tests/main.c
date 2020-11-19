@@ -52,4 +52,5 @@ int main(int argc, char** argv)
         //printf("end of the child with pid %d\n", getpid());
         detach_stack(stack);
     }
+    free(stack);
 }

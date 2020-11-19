@@ -4,7 +4,7 @@ const int size = 30;
 
 int main(int argc, char** argv)
 {
-    key_t key = atoi(argv[1]);
+    key_t key = rand_key_gen(argc, argv);
 
     clear_key(key, size);
 

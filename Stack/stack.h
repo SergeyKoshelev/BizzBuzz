@@ -1,9 +1,11 @@
+#define _GNU_SOURCE //for semtimedop
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/shm.h>
 #include <assert.h>
 #include <sys/sem.h>
 #include <sys/stat.h>
+#include <sys/ipc.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -41,6 +43,9 @@ int clear_key (key_t key, int size);
 
 /* Generate random key */
 key_t rand_key_gen(int argc, char** argv);
+
+/* Change semaphore */
+int sem_change(int sem_id, int sem_num, int val);
 
 //---------------------------------------------
 /* Additional tasks */

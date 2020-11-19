@@ -3,22 +3,14 @@
 //using constants push_count, fork_count and size create your own test
 //every process do push_count pushes and pops in stack
 
-const int size = 100000;
+const int size = 1000000;
 const char* path = "/home/sergey/stack/gen";
-const int push_count = 10;
-const int fork_count = 10;
+const int push_count = 5;
+const int fork_count = 13;
 
 int main(int argc, char** argv)
 {
-    key_t key;
-    if (argc == 1)
-    {
-        key_t key = ftok(path, 100);    
-    }
-    else
-    {
-        key = atoi(argv[1]);
-    }
+    key_t key = rand_key_gen (argc, argv);
     
     clear_key(key, size);
     pid_t main_pid = getpid();
