@@ -12,6 +12,7 @@
 #include <time.h>
 #include <errno.h>
 #include <string.h>
+#include <signal.h>
 
 struct stack_t;
 
@@ -45,7 +46,7 @@ int clear_key (key_t key, int size);
 key_t rand_key_gen(int argc, char** argv);
 
 /* Change semaphore */
-int sem_change(int sem_id, int sem_num, int val);
+int sem_change(int sem_id, int sem_num, int val, int undo);
 
 //---------------------------------------------
 /* Additional tasks */

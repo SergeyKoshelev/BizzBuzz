@@ -16,8 +16,8 @@ int main(int argc, char** argv)
     //printf("main pid: %d\n", main_pid);
 
     clear_key(key, size);
-    printf("key is clear\n");
-    struct stack_t* stack = attach_stack(key, size);
+    //printf("key is clear\n");
+    
     pid_t pid;
 
     setgid(main_pid);
@@ -27,8 +27,7 @@ int main(int argc, char** argv)
         pid = fork();
     }
 
-    if (getpid() != main_pid)
-        stack = attach_stack(key, size);
+    struct stack_t* stack = attach_stack(key, size);
     
     assert(stack != NULL);
 
@@ -52,6 +51,7 @@ int main(int argc, char** argv)
         void* a;
         setgid(main_pid + 1);
         killpg(main_pid, SIGKILL);
+        //printf("Im here\n");
         push(stack, NULL);
         push(stack, NULL);
         pop(stack, &a);

@@ -5,6 +5,8 @@ struct timespec timeout_time = {0, 0};
 
 const int SEM_COUNT = 0;
 const int SEM_FLAG = 1;
+const int NEED = 1;
+const int NOT_NEED = 0;
 
 struct stack_t
 {
@@ -73,7 +75,7 @@ struct stack_t* attach_stack(key_t key, int size)
         }
         
         assert (sem_id > 0);
-        sem_change(sem_id, SEM_FLAG, 1);
+        sem_change(sem_id, SEM_FLAG, 1, NOT_NEED);
     }
 
     stack->size = size;
@@ -147,19 +149,19 @@ int push(struct stack_t* stack, void* val)
         return -1;
     }
 
-    int check = sem_change(stack->sem_id, SEM_FLAG, -1);
+    int check = sem_change(stack->sem_id, SEM_FLAG, -1, NEED);
     if (check == 0)
     {
         if (get_count(stack) >= get_size(stack))
         {
             printf("stack is full (size is %d), can't push\n", get_size(stack));
-            sem_change(stack->sem_id, SEM_FLAG, 1);
+            sem_change(stack->sem_id, SEM_FLAG, 1, NEED);
             return -1;
         }
     
         stack->memory[get_count(stack)] = val;
-        sem_change(stack->sem_id, SEM_COUNT, 1);
-        sem_change(stack->sem_id, SEM_FLAG, 1);
+        sem_change(stack->sem_id, SEM_COUNT, 1, NOT_NEED);
+        sem_change(stack->sem_id, SEM_FLAG, 1, NEED);
         return 0;
     }
     return check;
@@ -173,19 +175,19 @@ int pop(struct stack_t* stack, void** val)
         return -1;
     }
 
-    int check = sem_change(stack->sem_id, SEM_FLAG, -1);
+    int check = sem_change(stack->sem_id, SEM_FLAG, -1, NEED);
     if (check == 0)
     {
         if (get_count(stack) == 0)
         {
             printf("stack is empty, can't pop\n");
-            sem_change(stack->sem_id, SEM_FLAG, 1);
+            sem_change(stack->sem_id, SEM_FLAG, 1, NEED);
             return -1;
         }
 
         *val = stack->memory[get_count(stack) - 1];
-        sem_change(stack->sem_id, SEM_COUNT, -1);
-        sem_change(stack->sem_id, SEM_FLAG, 1);
+        sem_change(stack->sem_id, SEM_COUNT, -1, NOT_NEED);
+        sem_change(stack->sem_id, SEM_FLAG, 1, NEED);
         return 0; 
     }
 
@@ -220,7 +222,7 @@ key_t rand_key_gen(int argc, char** argv)
         return atoi(argv[1]);
 }
 
-int sem_change(int sem_id, int sem_num, int val)
+int sem_change(int sem_id, int sem_num, int val, int undo)
 {
     int res;
     struct sembuf sems;
@@ -238,21 +240,32 @@ int sem_change(int sem_id, int sem_num, int val)
     {
         if (timeout_flag == -1) //no wait, do immediately
         {
-            sems.sem_flg = IPC_NOWAIT | SEM_UNDO;
+            if (undo == NEED)
+                sems.sem_flg = IPC_NOWAIT | SEM_UNDO;
+            else 
+                sems.sem_flg = IPC_NOWAIT;
+            
             res = semop(sem_id, &sems, 1);
             //if (res == -1) /*if (errno == EAGAIN)*/ printf("So fast, sem is not ready\n");
             return res; 
         }
         else if (timeout_flag == 0) //wait inifinity time
         {
-            sems.sem_flg = SEM_UNDO;
+            if (undo == NEED)
+                sems.sem_flg = SEM_UNDO;
+            else
+                sems.sem_flg = 0;
+            
             res = semop(sem_id, &sems, 1);
             //if (res == -1) printf("ERROR sem_change 0\n");
             return res; 
         }
         else if (timeout_flag == 1) //wait only timeout time
         {
-            sems.sem_flg = SEM_UNDO;
+            if (undo == NEED)
+                sems.sem_flg = SEM_UNDO;
+            else
+                sems.sem_flg = 0;
             res = semtimedop(sem_id, &sems, 1, &timeout_time);
             if (res == -1) /* if (errno == EAGAIN) */ printf("Not enough time for sem_change\n");
             return res; 
