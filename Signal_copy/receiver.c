@@ -14,6 +14,12 @@ int arr_len = 0;
 int *arr = NULL;
 int flag = 1;
 
+#define SIG_FINISH SIGTERM
+#define SIG_GET0 SIGUSR1
+#define SIG_GET1 SIGUSR2
+#define SIG_CONTINUE SIGALRM
+#define SIG_STOP SIGINT
+
 int my_open (int argc, char** argv)
 {
 	if (argc == 2)
@@ -35,16 +41,20 @@ int my_open (int argc, char** argv)
 
 void get_0()
 { 
+    //printf("get 0\n");
     arr[arr_len] = 0;
     arr_len++;
 }
 void get_1()
 { 
+    //printf("get 1\n");
     arr[arr_len] = 1;
     arr_len++;
 }
 void finish ()
 { 
+    //printf("get sigint\n");
+    printf("Finished!\n");
     flag = 0;
 }
 
@@ -59,15 +69,18 @@ void write_symbol (int fd)
     }
     char sym = (char)num;
     write(fd, &sym, 1);
+    arr_len = 0;
 }
 
 sigset_t* create_sigset ()
 {
     sigset_t* sigset = (sigset_t*)malloc(sizeof(sigset_t));
     sigemptyset(sigset);
-    sigaddset(sigset, SIGUSR1);
-    sigaddset(sigset, SIGUSR2);
-    sigaddset(sigset, SIGINT);
+    sigaddset(sigset, SIG_FINISH);
+    sigaddset(sigset, SIG_GET0);
+    sigaddset(sigset, SIG_GET1);
+    sigaddset(sigset, SIG_CONTINUE);
+    sigaddset(sigset, SIG_STOP);
     return sigset;
 }
 
@@ -75,8 +88,8 @@ int main(int argc, char** argv)
 {
     int fd = my_open(argc, argv);
 
-    pid_t pid = getpid();
-    printf("My pid: %d\n", pid);
+    pid_t my_pid = getpid();
+    printf("My pid: %d\n", my_pid);
 
     arr = (int*)malloc(byte * sizeof(int));
     
@@ -84,26 +97,55 @@ int main(int argc, char** argv)
     siginfo_t* siginfo = (siginfo_t*)malloc(sizeof(siginfo_t));
     sigprocmask(SIG_BLOCK, sigset, NULL);
 
+    int signal = sigwaitinfo(sigset, siginfo);
+    pid_t sen_pid = siginfo->si_pid;
+    printf("Main sender pid: %d\n", sen_pid);
+    kill(sen_pid, SIG_CONTINUE);
+
     printf("Waiting for data...\n");
 
-    int signal;
     while(flag)
-    {  
+    {
+        kill(sen_pid, SIG_CONTINUE);
         signal = sigwaitinfo(sigset, siginfo);
-        if (signal == SIGUSR1) get_0();
-        else if (signal == SIGUSR2) get_1();
-        else if (signal == SIGINT) finish();
+        //printf("received signal %d\n", signal);
 
-        if (arr_len == 8)
+        if (sen_pid == siginfo->si_pid) 
         {
-            write_symbol(fd);
-            arr_len = 0;
+            switch ( signal ) 
+            {
+                case SIG_GET0 :  //get 0
+                    get_0();
+                    break;
+                case SIG_GET1 :  //get 1
+                    get_1();
+                    break;
+                case SIG_FINISH :  //end of file, finish properly
+                    finish();
+                    break;
+                case SIG_STOP :  //sender was stopped
+                    printf("Badly finished\n");
+                    flag = 0;
+                    break;
+                default:
+                    printf("bad signal\n");
+            }
+
+            if (arr_len == 8)
+                write_symbol(fd);
         }
-
-        kill(siginfo->si_pid, SIGUSR1);
+        else if (signal == SIG_STOP)
+        {
+            printf("\nFinished badly\n");
+            kill(sen_pid, SIG_FINISH);
+            flag = 0;
+        }
+        else if (siginfo->si_pid != my_pid)
+        {
+            kill(siginfo->si_pid, SIG_FINISH);
+            printf("More than 1 sender, i kill it, its pid: %d\n", siginfo->si_pid);
+        }
     }  
-
-    printf("Finished!\n");
 
     free(arr);
     close(fd);
