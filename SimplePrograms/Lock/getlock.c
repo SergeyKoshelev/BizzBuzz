@@ -17,6 +17,9 @@ void print_flock(struct flock fl)
         case F_RDLCK:
             printf("F_RDLCK\n");
             break;
+        case F_UNLCK:
+            printf("F_UNLCK\n");
+            break;
         default:
             printf("UNKNOWN\n");
     }

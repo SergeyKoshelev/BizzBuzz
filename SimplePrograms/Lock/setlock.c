@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 
 const char str[] = "Hello, locked world!\n";
 
@@ -21,8 +22,8 @@ int main(int argc, char** argv)
     f1.l_pid = 0;
 
     f2.l_type = F_WRLCK;
-    f2.l_whence = SEEK_SET + 2;
-    f2.l_len = 1;
+    f2.l_whence = SEEK_END;
+    f2.l_len = -1;
     f2.l_pid = 0;
     
 
@@ -32,10 +33,21 @@ int main(int argc, char** argv)
 
     int ret;
     ret = fcntl(fd, F_SETLK, &f1);
-    assert (ret == 0);
+    if (ret < 0)
+    {
+        printf("can't set lock\n");
+        close(fd);
+        exit(0);
+    }
     printf("set RDLCK\n");
+
     ret = fcntl(fd, F_SETLK, &f2);
-    assert (ret == 0);
+    if (ret < 0)
+    {
+        printf("can't set lock\n");
+        close(fd);
+        exit(0);
+    }
     printf("set WRLCK\n");
 
     sleep(1000);
