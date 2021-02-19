@@ -8,13 +8,20 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <string.h>
+#include <assert.h>
 
 #define PATH "/tmp/mysock"
 #define BUFSZ 256
 
-#define DUMMY_STR "Putin is the president of Russia"
+#define DUMMY_STR "lalala printing smth for otl10"
 
-#define PRINT "PRINT"
-#define EXIT "EXIT"
+#define PRINT "print"
+#define EXIT "exit"
+#define CD "cd"
+#define LS "ls"
+#define CLOSE "close"
 
 #endif

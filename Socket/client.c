@@ -34,12 +34,12 @@ int main() {
     int sk, ret, flag = 1;
     char buffer[BUFSZ] = {0};
     
-    sk = create_socket();
     create_sock_name(&name);
-    connect_socket(sk, name);
-
+    
     while (flag)
     {
+        sk = create_socket();
+        connect_socket(sk, name);
         scanf("%s", buffer);
         ret = write(sk, buffer, BUFSZ);
         if (ret < 0)
@@ -47,6 +47,6 @@ int main() {
             perror("Unable to write");
             exit(1);
         }
+        close(sk);
     }
-    close(sk);
 }
