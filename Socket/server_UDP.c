@@ -26,12 +26,12 @@ int separate_buffer(char * buffer, char* data)
 int handler (char* buffer)
 {
     //printf("buffer: (%s)\n", buffer);
-    if (!strncmp(buffer, PRINT, sizeof(PRINT) - 1))
+    if (starts_with(buffer, PRINT))
     {
         printf("%s\n", buffer + sizeof(PRINT));
         return 1;
     }
-    else if (!strncmp(buffer, LS, sizeof(LS) - 1))
+    else if (starts_with(buffer, LS))
     {
         pid_t pid = fork();
         if (pid == 0)
@@ -43,7 +43,7 @@ int handler (char* buffer)
         waitpid(pid, NULL, 0);
         return 1;
     }
-    else if (!strncmp(buffer, CD, sizeof(CD) - 1))
+    else if (starts_with(buffer, CD))
     {
         char* path = buffer + sizeof(CD);
         printf("new directory: (%s)\n", path);
@@ -57,7 +57,7 @@ int handler (char* buffer)
     }
     else
     {
-        printf("UNKNOWN COMMAND\n");
+        printf("UNKNOWN COMMAND: (%s)\n", buffer);
         return 1;
     }
     
@@ -118,7 +118,6 @@ int main()
 
     int sk, ret, flag = 1, clients_count = 0, new = 0, pipe_to_fd, pipe_from_fd, position, count;
     struct sockaddr_in name = {0};
-    socklen_t fromlen = sizeof(name);
     int main_pid = getpid();
     int pid = main_pid;
     client_info* clients = (client_info*)malloc(MAX_CLIENTS_COUNT * sizeof(client_info));
@@ -132,31 +131,21 @@ int main()
     {
         char data[BUFSZ] = {0};
         char buffer[BUFSZ] = {0};
-        ret = recvfrom(sk, buffer, BUFSZ, 0, (struct sockaddr*)&name, &fromlen);
-
-        if (ret < 0 || ret > BUFSZ)
-        {
-            printf("Unexpected read error or overflow %d\n", ret);
-            exit(1);
-        }
+        receive_data(sk, &name, buffer);
 
         int client_id = separate_buffer(buffer, data);
         //printf("id: %d\tdata:(%s)\n", client_id, data);
         position = check_info(clients, client_id, &clients_count, &flag);
     
-        if (!strncmp(data, FINDALL, sizeof(FINDALL) - 1)) //if command findall
+        if (starts_with(data, FINDALL)) //if command findall
         {
             printf("get findall\n");
             
-            ret = sendto(sk, "server", BUFSZ, 0, (struct sockaddr*)&name, sizeof(name)); //send response on findall
-            if (ret < 0)
-            {
-                perror("Unable to write");
-                exit(1);
-            }
+            send_data(sk, &name, "server");
         }
-        else if ((flag == 1) && (strncmp(data, EXIT, sizeof(EXIT) - 1)))  //if new client and not command close
+        else if ((flag == 1) && (!starts_with(data, EXIT)))  //if new client and not command close
         {
+            printf("im here\n");
             pipe_from_fd = clients[position].pipes_from_main[0];
             pipe_to_fd = clients[position].pipes_to_main[1];
             pid = fork();
@@ -171,29 +160,19 @@ int main()
                 write(clients[position].pipes_from_main[1], data, strlen(data));
                 count = read(clients[position].pipes_to_main[0], data, BUFSZ);
                 data[count] = '\0';
-                ret = sendto(sk, data, BUFSZ, 0, (struct sockaddr*)&name, sizeof(name)); //send findall command
-                if (ret < 0)
-                {
-                    perror("Unable to write");
-                    exit(1);
-                }
+                send_data(sk, &name, data);
             } 
         }
-        else if ((flag == 1) && (!strncmp(data, EXIT, sizeof(EXIT) - 1)))  //if new client and command close
+        else if ((flag == 1) && (starts_with(data, EXIT)))  //if new client and command close
             continue; //ignore it
-        else if (!strncmp(data, EXIT, sizeof(EXIT) - 1))
+        else if (starts_with(data, EXIT))
             client_disconnect(clients, position, &clients_count);
         else
         {
             write(clients[position].pipes_from_main[1], data, strlen(data));
             count = read(clients[position].pipes_to_main[0], data, BUFSZ);
             data[count] = '\0';
-            ret = sendto(sk, data, BUFSZ, 0, (struct sockaddr*)&name, sizeof(name)); //send findall command
-            if (ret < 0)
-            {
-                perror("Unable to write");
-                exit(1);
-            } 
+            send_data(sk, &name, data);
         }     
     }
 

@@ -86,10 +86,10 @@ void send_data(int sk, struct sockaddr_in* name, char* data)
     }
 }
 
-void receive_data(int sk, struct sockaddr_in* name, char* data)
+void receive_data(int sk, struct sockaddr_in* name, char* buffer)
 {
-    socklen_t fromlen = sizeof(*name);
-    int ret = recvfrom(sk, data, BUFSZ, 0, (struct sockaddr*)&name, &fromlen);
+    socklen_t fromlen = sizeof(struct sockaddr_in);
+    int ret = recvfrom(sk, buffer, BUFSZ, 0, (struct sockaddr*)name, &fromlen);
 
     if (ret < 0 || ret > BUFSZ)
     {
@@ -100,6 +100,6 @@ void receive_data(int sk, struct sockaddr_in* name, char* data)
 
 int starts_with(char* str, char* substr)
 {
-    return (!strncmp(str, substr, strlen(str)));
+    return (!strncmp(str, substr, strlen(substr)));
 }
 #endif
