@@ -10,6 +10,7 @@ Programms: server_TCP.c & client_TCP.c
 
 
 UDP:  
+Using UDP protocol, broadcast for command "findall", output in client, log of commands in server  
 library: UDP.h  
 Programms: server_UDP.c & client_UDP.c  
 Compile:  
