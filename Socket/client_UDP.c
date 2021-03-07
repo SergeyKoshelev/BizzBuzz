@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
             bind_socket(sk, name);  //bind to rec message back
 
             receive_data(sk, &name, buffer);
-            printf("find server, buf: (%s), id: %s\n", buffer, inet_ntoa(name.sin_addr));
+            printf("find server, buf: (%s), ip: %s\n", buffer, inet_ntoa(name.sin_addr));
             //setsockopt(sk, SOL_SOCKET, SO_)  //change sk opt to usual mode (not broadcast)
         }
     }

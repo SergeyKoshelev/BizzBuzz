@@ -22,7 +22,8 @@ int separate_buffer(char * buffer, char* data)
     return client_id;
 }
 
-//doing command from data
+//doing command from buffer
+//fuction for subproccess 
 int handler (char* buffer)
 {
     //printf("buffer: (%s)\n", buffer);
@@ -46,13 +47,11 @@ int handler (char* buffer)
     else if (starts_with(buffer, CD))
     {
         char* path = buffer + sizeof(CD);
-        printf("new directory: (%s)\n", path);
         int ret = chdir(path);
         if (ret < 0)
-        {
-            perror("Cant change directory\n");
-            exit(1);
-        }
+            perror("Cant change directory");
+        else
+            printf("new directory: (%s)\n", path);
         return 1;
     }
     else
@@ -77,7 +76,7 @@ int check_info(client_info* clients, int client_id, int* clients_count, int* new
 
     if (i < MAX_CLIENTS_COUNT)
     {
-        printf("connecting with new client\n");
+        printf("Connected with new client, id: %d\n", client_id);
         clients[i].client_id = client_id;
         pipe(clients[i].pipes_from_main);
         pipe(clients[i].pipes_to_main);
@@ -90,7 +89,7 @@ int check_info(client_info* clients, int client_id, int* clients_count, int* new
 //disconnect server, closes pipes and replace cell of client 
 int client_disconnect(client_info* clients, int position, int* clients_count)
 {
-    printf("disconnect client, id: %d\n", clients[position].client_id);
+    printf("Client disconnected, id: %d\n", clients[position].client_id);
     kill(clients[position].pid, SIGKILL);
     clients[position].client_id = 0;
     close(clients[position].pipes_from_main[0]); //close input in pipe
@@ -110,6 +109,15 @@ int client_disconnect(client_info* clients, int position, int* clients_count)
 
         clients[*clients_count].client_id = 0;
     }
+}
+
+//delegate work to subprocess using pipes
+int delegate(client_info* clients, int position, char* data)
+{
+    printf("Id: %d\tCommand: %s\n", clients[position].client_id, data);
+    write(clients[position].pipes_from_main[1], data, strlen(data));
+    int count = read(clients[position].pipes_to_main[0], data, BUFSZ);
+    data[count] = '\0';
 }
 
 int main()
@@ -139,13 +147,11 @@ int main()
     
         if (starts_with(data, FINDALL)) //if command findall
         {
-            printf("get findall\n");
-            
+            printf("Command: findall\n");
             send_data(sk, &name, "server");
         }
         else if ((flag == 1) && (!starts_with(data, EXIT)))  //if new client and not command close
         {
-            printf("im here\n");
             pipe_from_fd = clients[position].pipes_from_main[0];
             pipe_to_fd = clients[position].pipes_to_main[1];
             pid = fork();
@@ -157,9 +163,7 @@ int main()
             else //parent
             {
                 clients[position].pid = pid;
-                write(clients[position].pipes_from_main[1], data, strlen(data));
-                count = read(clients[position].pipes_to_main[0], data, BUFSZ);
-                data[count] = '\0';
+                delegate(clients, position, data);
                 send_data(sk, &name, data);
             } 
         }
@@ -169,9 +173,7 @@ int main()
             client_disconnect(clients, position, &clients_count);
         else
         {
-            write(clients[position].pipes_from_main[1], data, strlen(data));
-            count = read(clients[position].pipes_to_main[0], data, BUFSZ);
-            data[count] = '\0';
+            delegate(clients, position, data);
             send_data(sk, &name, data);
         }     
     }
@@ -181,6 +183,7 @@ int main()
     if (pid == 0)
     {
         dup2(pipe_to_fd, STDOUT_FILENO);
+        dup2(pipe_to_fd, STDERR_FILENO);
         flag = 1;
         while (flag)
         {
