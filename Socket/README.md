@@ -15,10 +15,10 @@ Using UDP protocol, broadcast for command "findall", output in client, log of co
 **Programms**: 
 	server_UDP.c & client_UDP.c  
 **Compile**:  
-	gcc server_UDP.c -o server  
-	gcc client_UDP.c -o client  
-	./server  
-	./client [ip]  
+	gcc server_UDP.c -o server
+	gcc client_UDP.c -o client
+	./server
+	./client [ip]
 **Commands in client**:  
 	1)print [str]  
 	2)findall  
