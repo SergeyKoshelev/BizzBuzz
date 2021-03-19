@@ -3,13 +3,6 @@
 #include <arpa/inet.h>
 const char server_ip[] = "127.0.0.1";
 
-struct client_info {
-    int pid;
-    int client_id;
-    int pipes_from_main[2];
-    int pipes_to_main[2];
-}; typedef struct client_info client_info;
-
 //separate received buffer on id and data
 //returns id, data in variable data
 int separate_buffer(char * buffer, char* data) 
@@ -22,11 +15,82 @@ int separate_buffer(char * buffer, char* data)
     return client_id;
 }
 
+//start shell, create fd
+void start_shell(int* shellfd)
+{
+    int ret, resfd, pid;
+    int fd = open("/dev/ptmx", O_RDWR | O_NOCTTY);
+    if (fd < 0)
+        perror("open fd");
+    
+    *shellfd = fd;
+
+    if (grantpt(fd) < 0)
+        perror("grantpt");
+    if (unlockpt(fd) < 0)
+        perror("unlockpt");
+    char* path = ptsname(fd);
+    if (path == NULL)
+        perror("ptsname");
+    resfd = open(path, O_RDWR);
+    if (resfd < 0)
+        perror("open resfd");
+    struct termios termios_p;
+    termios_p.c_lflag = 0;
+    tcsetattr(resfd, 0, &termios_p);
+        //perror("tcsetattr");
+    pid = fork();
+    if (pid == 0) {
+        if (dup2(resfd, STDIN_FILENO) < 0)
+            perror("dup2 resfd stdin");
+        if (dup2(resfd, STDOUT_FILENO) < 0)
+            perror("dup2 resfd stdout");
+        if (dup2(resfd, STDERR_FILENO) < 0)
+            perror("dup2 resfd stdrerr");
+        if (setsid() < 0)
+            perror("setsid");
+        execl("/bin/bash", "/bin/bash", NULL);
+        perror("execl");
+        exit(1);
+    }
+
+    char trash_buf[BUFSZ];
+    read(*shellfd, trash_buf, BUFSZ);
+}
+
 //doing command from buffer
 //fuction for subproccess 
-int handler (char* buffer)
+int handler (char* buffer, int* shellfd)
 {
-    //printf("buffer: (%s)\n", buffer);
+      
+    if (*shellfd > 0)  //if shell is activated
+    {
+        buffer[strlen(buffer)] = '\n';
+        //printf("(%s)", buffer);
+        int ret = write(*shellfd, buffer, strlen(buffer));
+
+        if (starts_with(buffer, EXIT))  //if exit shell
+        {
+            *shellfd = -1;
+            printf("Exit from shell\n");
+        }
+        else   //if command for shell (not exit)
+        {    
+            struct pollfd poll_info = {*shellfd, POLLIN};
+            while (ret = poll(&poll_info, 1, TIMEOUT) != 0) 
+            {
+                clear_buf(buffer, BUFSZ);
+                ret = read(*shellfd, buffer, BUFSZ);
+                if (ret < 0)
+                    perror("read from pipe");
+        
+                printf("%s", buffer);
+            }
+        }
+        return 1;
+    }
+
+    //if shell if not activated
     if (starts_with(buffer, PRINT))
     {
         printf("%s\n", buffer + sizeof(PRINT));
@@ -54,6 +118,14 @@ int handler (char* buffer)
             printf("new directory: (%s)\n", path);
         return 1;
     }
+    else if (starts_with(buffer, SHELL))
+    {
+        if (*shellfd < 0)
+            start_shell(shellfd);
+
+        printf("Shell started\n");
+        return 1;
+    }
     else
     {
         printf("UNKNOWN COMMAND: (%s)\n", buffer);
@@ -68,18 +140,19 @@ int check_info(client_info* clients, int client_id, int* clients_count, int* new
 {
     int i = 0;
     for (i = 0; i < *clients_count; i++)
-        if (clients[i].client_id == client_id)
+        if (clients[i].client_id == client_id) //if such client exists
         {
             *new = 0;
             return i;
         }
 
-    if (i < MAX_CLIENTS_COUNT)
+    if (i < MAX_CLIENTS_COUNT)  //if new client and not overload in clients array
     {
-        printf("Connected with new client, id: %d\n", client_id);
+        printf("id: %d\tConnected\n", client_id);
         clients[i].client_id = client_id;
         pipe(clients[i].pipes_from_main);
         pipe(clients[i].pipes_to_main);
+        clients[i].shell = 0;
         *clients_count += 1;
         *new = 1;
         return i;
@@ -89,7 +162,7 @@ int check_info(client_info* clients, int client_id, int* clients_count, int* new
 //disconnect server, closes pipes and replace cell of client 
 int client_disconnect(client_info* clients, int position, int* clients_count)
 {
-    printf("Client disconnected, id: %d\n", clients[position].client_id);
+    printf("id: %d\tDisconnected\n", clients[position].client_id);
     kill(clients[position].pid, SIGKILL);
     clients[position].client_id = 0;
     close(clients[position].pipes_from_main[0]); //close input in pipe
@@ -111,13 +184,12 @@ int client_disconnect(client_info* clients, int position, int* clients_count)
     }
 }
 
-//delegate work to subprocess using pipes
+//delegate work to subprocess using pipes (just write request in pipe)
 int delegate(client_info* clients, int position, char* data)
 {
     printf("Id: %d\tCommand: %s\n", clients[position].client_id, data);
     write(clients[position].pipes_from_main[1], data, strlen(data));
-    int count = read(clients[position].pipes_to_main[0], data, BUFSZ);
-    data[count] = '\0';
+    //usleep(100);
 }
 
 int main()
@@ -139,7 +211,7 @@ int main()
     {
         char data[BUFSZ] = {0};
         char buffer[BUFSZ] = {0};
-        receive_data(sk, &name, buffer);
+        receive_buf(sk, &name, buffer);
 
         int client_id = separate_buffer(buffer, data);
         //printf("id: %d\tdata:(%s)\n", client_id, data);
@@ -147,39 +219,50 @@ int main()
     
         if (starts_with(data, FINDALL)) //if command findall
         {
-            printf("Command: findall\n");
-            send_data(sk, &name, "server");
+            printf("FINDALL\n");
+            send_buf(sk, &name, "server");
         }
-        else if ((flag == 1) && (!starts_with(data, EXIT)))  //if new client and not command close
-        {
-            pipe_from_fd = clients[position].pipes_from_main[0];
-            pipe_to_fd = clients[position].pipes_to_main[1];
-            pid = fork();
-            if (pid == 0) //child
-            {
-                free(clients);
-                break;
-            }
-            else //parent
-            {
-                clients[position].pid = pid;
-                delegate(clients, position, data);
-                send_data(sk, &name, data);
-            } 
-        }
-        else if ((flag == 1) && (starts_with(data, EXIT)))  //if new client and command close
+        else if ((flag == 1) && (starts_with(data, EXIT)))  //if new client and command exit
             continue; //ignore it
-        else if (starts_with(data, EXIT))
+        else if (starts_with(data, EXIT) && (clients[position].shell == 0))  //if command exit and server's part not in shell
             client_disconnect(clients, position, &clients_count);
-        else
+        else 
         {
             delegate(clients, position, data);
-            send_data(sk, &name, data);
-        }     
+
+            if (flag == 1) //if new client
+            {
+                pipe_from_fd = clients[position].pipes_from_main[0];
+                pipe_to_fd = clients[position].pipes_to_main[1];
+                pid = fork();
+                if (pid == 0) //child
+                {
+                    free(clients);
+                    break;
+                }
+                clients[position].pid = pid;
+            }
+
+            if (starts_with(data, EXIT))  //if command exit in shell
+            {
+                printf("id: %d\tDeactivated shell\n", clients[position].client_id);
+
+                clients[position].shell = 0;
+            }
+            else if (starts_with(data, SHELL)) //if command shell
+            {
+                printf("id: %d\tStarting shell\n", clients[position].client_id);
+                clients[position].shell = 1;
+            }
+
+            send_data(sk, &name, data, clients, position);
+        } 
+      
     }
 
 
     //code for child, read data from its pipe and do command from data
+    int shellfd = -1;
     if (pid == 0)
     {
         dup2(pipe_to_fd, STDOUT_FILENO);
@@ -188,8 +271,8 @@ int main()
         while (flag)
         {
             char data[BUFSZ] = {0};
-            read(pipe_from_fd, data, BUFSZ);
-            flag = handler(data);
+            read(pipe_from_fd, data, BUFSZ);  //read command from main server
+            flag = handler(data, &shellfd); //do command
         }
     }
     else //code for main process of server, close server

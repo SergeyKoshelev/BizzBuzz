@@ -29,6 +29,8 @@ int get_str(char* buffer, struct sockaddr_in* name)
         return -1;
     else if (starts_with(tmp_buf, EXIT))
         return 0;
+    else if (starts_with(tmp_buf, SHELL))
+        return 2;
     else
         return 1;
     
@@ -39,7 +41,7 @@ int main(int argc, char** argv) {
     assert(argc > 1);
     struct sockaddr_in name = {0};
     struct in_addr addr = {0};
-    int sk, ret, flag = 1;
+    int sk, ret, flag = 1, shell = 0;
     char buffer[BUFSZ] = {0};
     
     convert_address(argv[1], &addr);
@@ -54,15 +56,24 @@ int main(int argc, char** argv) {
         
         if (flag >= 0) //usual command
         {
-            send_data(sk, &name, buffer);
-            
-            if (flag > 0) //if command not exit
+            send_buf(sk, &name, buffer);
+
+            if ((shell == 1) && (flag == 0)) //if exit in shell
+            {
+                flag = 1;
+                shell = 0;
+            }
+            else if (flag == 2)  //if command shell
+                shell = 1; 
+
+            //printf("flag = %d\tshell = %d\n", flag, shell);
+            if ((flag == 1) || ((flag == 0) && (shell == 1)) || (flag == 2)) //if classic command or exit in shell or "shell" command
             {
                 name.sin_addr.s_addr = htonl(INADDR_ANY);
                 name.sin_port = 0;
                 bind_socket(sk, name);  //bind to rec message back
+                printf("response on request:\n");
                 receive_data(sk, &name, buffer);
-                printf("response on request:\n%s\n", buffer);
             }
         }
         else if (flag == -1) //findall command
@@ -75,13 +86,13 @@ int main(int argc, char** argv) {
             }
 
             name.sin_addr.s_addr = htonl(INADDR_BROADCAST);   //make broadcast
-            send_data(sk, &name, buffer);
+            send_buf(sk, &name, buffer);
 
             name.sin_addr.s_addr = htonl(INADDR_ANY);
             name.sin_port = 0;
             bind_socket(sk, name);  //bind to rec message back
 
-            receive_data(sk, &name, buffer);
+            receive_buf(sk, &name, buffer);
             printf("find server, buf: (%s), ip: %s\n", buffer, inet_ntoa(name.sin_addr));
             //setsockopt(sk, SOL_SOCKET, SO_)  //change sk opt to usual mode (not broadcast)
         }
