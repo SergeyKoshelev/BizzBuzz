@@ -21,9 +21,13 @@ void connect_socket (int sk, struct sockaddr_in name)
 int get_str(char* buffer, struct sockaddr_in* name)
 {
     char tmp_buf[BUFSZ] = {0};
-    fgets(tmp_buf, BUFSZ, stdin);
+    char* ret_s = fgets(tmp_buf, BUFSZ, stdin);
+    if (ret_s == NULL)
+        perror("fgets in get_str");
     tmp_buf[strlen(tmp_buf) - 1] = '\0';
-    sprintf(buffer, "%d %s", get_id(), tmp_buf);
+    int ret = sprintf(buffer, "%d %s", get_id(), tmp_buf);
+    if (ret < 0)
+        perror("sprintf in get_str");
     
     if (starts_with(tmp_buf, FINDALL)) //if command findall
         return -1;
@@ -46,6 +50,10 @@ int main(int argc, char** argv) {
     
     convert_address(argv[1], &addr);
     sk = create_socket(); 
+
+    ret = setsockopt(sk, SOL_SOCKET, SO_BROADCAST | SO_REUSEADDR | SO_REUSEPORT, &(int){1}, sizeof(int));
+    if (ret < 0)
+        perror("setsockipt can't change mode\n");
 
     while (flag)
     {
@@ -78,13 +86,6 @@ int main(int argc, char** argv) {
         }
         else if (flag == -1) //findall command
         {
-            ret = setsockopt(sk, SOL_SOCKET, SO_BROADCAST, &(int){1}, sizeof(int));
-            if (ret < 0)
-            {
-                perror("Can't change mode\n");
-                exit(1);
-            }
-
             name.sin_addr.s_addr = htonl(INADDR_BROADCAST);   //make broadcast
             send_buf(sk, &name, buffer);
 

@@ -2,6 +2,10 @@
 
 #include <arpa/inet.h>
 const char server_ip[] = "127.0.0.1";
+char log_str[BUFSZ];
+
+FILE* logfile = NULL;
+int fifo_fd = -1;
 
 //separate received buffer on id and data
 //returns id, data in variable data
@@ -18,10 +22,9 @@ int separate_buffer(char * buffer, char* data)
 //start shell, create fd
 void start_shell(int* shellfd)
 {
-    int ret, resfd, pid;
     int fd = open("/dev/ptmx", O_RDWR | O_NOCTTY);
     if (fd < 0)
-        perror("open fd");
+        perror("Open fd in start shell");
     
     *shellfd = fd;
 
@@ -32,21 +35,21 @@ void start_shell(int* shellfd)
     char* path = ptsname(fd);
     if (path == NULL)
         perror("ptsname");
-    resfd = open(path, O_RDWR);
-    if (resfd < 0)
-        perror("open resfd");
+    int res_fd = open(path, O_RDWR);
+    if (res_fd < 0)
+        perror("open res_fd in start shell");
     struct termios termios_p;
     termios_p.c_lflag = 0;
-    tcsetattr(resfd, 0, &termios_p);
+    tcsetattr(res_fd, 0, &termios_p);
         //perror("tcsetattr");
-    pid = fork();
+    int pid = fork();
     if (pid == 0) {
-        if (dup2(resfd, STDIN_FILENO) < 0)
-            perror("dup2 resfd stdin");
-        if (dup2(resfd, STDOUT_FILENO) < 0)
-            perror("dup2 resfd stdout");
-        if (dup2(resfd, STDERR_FILENO) < 0)
-            perror("dup2 resfd stdrerr");
+        if (dup2(res_fd, STDIN_FILENO) < 0)
+            perror("dup2 res_fd stdin");
+        if (dup2(res_fd, STDOUT_FILENO) < 0)
+            perror("dup2 res_fd stdout");
+        if (dup2(res_fd, STDERR_FILENO) < 0)
+            perror("dup2 res_fd stdrerr");
         if (setsid() < 0)
             perror("setsid");
         execl("/bin/bash", "/bin/bash", NULL);
@@ -82,7 +85,7 @@ int handler (char* buffer, int* shellfd)
                 clear_buf(buffer, BUFSZ);
                 ret = read(*shellfd, buffer, BUFSZ);
                 if (ret < 0)
-                    perror("read from pipe");
+                    perror("read from shellfd");
         
                 printf("%s", buffer);
             }
@@ -101,8 +104,8 @@ int handler (char* buffer, int* shellfd)
         pid_t pid = fork();
         if (pid == 0)
         {
-            int res = execlp("ls", "ls", NULL);
-            printf("Error in exec in LS\n");
+            execlp("ls", "ls", NULL);
+            perror("Error in exec in LS");
             exit(1);
         }
         waitpid(pid, NULL, 0);
@@ -115,15 +118,18 @@ int handler (char* buffer, int* shellfd)
         if (ret < 0)
             perror("Cant change directory");
         else
-            printf("new directory: (%s)\n", path);
+            printf("New directory: (%s)\n", path);
         return 1;
     }
     else if (starts_with(buffer, SHELL))
     {
         if (*shellfd < 0)
             start_shell(shellfd);
-
-        printf("Shell started\n");
+        if (*shellfd > 0)
+            printf("Shell started\n");
+        else
+            printf("Error with starting shell\n");
+        
         return 1;
     }
     else
@@ -148,10 +154,13 @@ int check_info(client_info* clients, int client_id, int* clients_count, int* new
 
     if (i < MAX_CLIENTS_COUNT)  //if new client and not overload in clients array
     {
-        printf("id: %d\tConnected\n", client_id);
         clients[i].client_id = client_id;
-        pipe(clients[i].pipes_from_main);
-        pipe(clients[i].pipes_to_main);
+        int ret = pipe(clients[i].pipes_from_main);
+        if (ret < 0)
+            fprintf(logfile, "creating pipes from main to subprocess for new client: %s\n", strerror(errno));
+        ret = pipe(clients[i].pipes_to_main);
+        if (ret < 0)
+            fprintf(logfile, "creating pipes to main from subprocess for new client: %s\n", strerror(errno));
         clients[i].shell = 0;
         *clients_count += 1;
         *new = 1;
@@ -162,13 +171,28 @@ int check_info(client_info* clients, int client_id, int* clients_count, int* new
 //disconnect server, closes pipes and replace cell of client 
 int client_disconnect(client_info* clients, int position, int* clients_count)
 {
-    printf("id: %d\tDisconnected\n", clients[position].client_id);
-    kill(clients[position].pid, SIGKILL);
+    //clear_buf(log_str, BUFSZ);
+    //sprintf(log_str, "id: %d\tDisconnected\n", clients[position].client_id);
+    //int count = write(fifo_fd, log_str, strlen(log_str));
+    //assert(count > 0);
+    fprintf(logfile, "id: %d\tDisconnected\n", clients[position].client_id);
+
+    int ret = kill(clients[position].pid, SIGKILL);
+    if (ret < 0)
+        fprintf(logfile, "kill in client disconnect: %s\n", strerror(errno));
     clients[position].client_id = 0;
-    close(clients[position].pipes_from_main[0]); //close input in pipe
-	close(clients[position].pipes_from_main[1]); //close output from pipe
-    close(clients[position].pipes_to_main[0]); //close input in pipe
-	close(clients[position].pipes_to_main[1]); //close output from pipe
+    ret = close(clients[position].pipes_from_main[0]); //close input in pipe
+    if (ret < 0)
+        fprintf(logfile, "close pipe from main, 0 in client disconnecting: %s\n", strerror(errno));
+	ret = close(clients[position].pipes_from_main[1]); //close output from pipe
+    if (ret < 0)
+        fprintf(logfile, "close pipe from main, 1 in client disconnecting: %s\n", strerror(errno));
+    ret = close(clients[position].pipes_to_main[0]); //close input in pipe
+    if (ret < 0)
+        fprintf(logfile, "close pipe to main, 0 in client disconnecting: %s\n", strerror(errno));
+	ret = close(clients[position].pipes_to_main[1]); //close output from pipe
+    if (ret < 0)
+        fprintf(logfile, "close pipe to main, 1 in client disconnecting: %s\n", strerror(errno));
     *clients_count -= 1;
     //printf("count: %d\t position: %d\n", *clients_count, position);
     if (*clients_count != position) //not last elem of array, move last elem to empty cell
@@ -185,25 +209,36 @@ int client_disconnect(client_info* clients, int position, int* clients_count)
 }
 
 //delegate work to subprocess using pipes (just write request in pipe)
-int delegate(client_info* clients, int position, char* data)
+int delegate(client_info* clients, int position, char* data, int fifo_fd)
 {
-    printf("Id: %d\tCommand: %s\n", clients[position].client_id, data);
-    write(clients[position].pipes_from_main[1], data, strlen(data));
-    //usleep(100);
+    int ret = write(clients[position].pipes_from_main[1], data, strlen(data));
+    if (ret < 0)
+        fprintf(logfile, "write in pipe to subprocess: %s\n", strerror(errno));
 }
 
 int main()
 {
+    start_daemon();
+    logfile = stdout;
+    int main_pid = getpid();
+    int pid = main_pid;
+
+    logfile = open_log_file();
+    fprintf(logfile, "\nStart server with pid: %d\n", main_pid);
+    printf("Start server with pid: %d\n", main_pid);
     unlink(PATH);
+    
 
     int sk, ret, flag = 1, clients_count = 0, new = 0, pipe_to_fd, pipe_from_fd, position, count;
     struct sockaddr_in name = {0};
-    int main_pid = getpid();
-    int pid = main_pid;
+    
     client_info* clients = (client_info*)malloc(MAX_CLIENTS_COUNT * sizeof(client_info));
 
     struct in_addr addr = {INADDR_ANY}; //for accepting all incoming messages, server_ip become useless
+    //convert_address(server_ip, &addr); //how to save from INADDR_ANY?
     sk = create_socket();
+    //close(sk);
+    //exit(0);
     create_sock_name(&name, addr);
     bind_socket(sk, name);
 
@@ -211,7 +246,11 @@ int main()
     {
         char data[BUFSZ] = {0};
         char buffer[BUFSZ] = {0};
+        if ((logfile != stdout) && (logfile != NULL))
+            fclose(logfile);
+
         receive_buf(sk, &name, buffer);
+        logfile = open_log_file();
 
         int client_id = separate_buffer(buffer, data);
         //printf("id: %d\tdata:(%s)\n", client_id, data);
@@ -219,7 +258,7 @@ int main()
     
         if (starts_with(data, FINDALL)) //if command findall
         {
-            printf("FINDALL\n");
+            fprintf(logfile, "FINDALL\n");
             send_buf(sk, &name, "server");
         }
         else if ((flag == 1) && (starts_with(data, EXIT)))  //if new client and command exit
@@ -228,7 +267,7 @@ int main()
             client_disconnect(clients, position, &clients_count);
         else 
         {
-            delegate(clients, position, data);
+            delegate(clients, position, data, fifo_fd);
 
             if (flag == 1) //if new client
             {
@@ -240,18 +279,38 @@ int main()
                     free(clients);
                     break;
                 }
+                
+                //clear_buf(log_str, BUFSZ);
+                //sprintf(log_str, "id: %d\tConnected\n", clients[position].client_id);
+                //count = write(fifo_fd, log_str, strlen(log_str));
+                //assert(count > 0);
+                fprintf(logfile, "id: %d\tConnected\n", clients[position].client_id);   //stdout can't be replaced!?!?!?!?!
                 clients[position].pid = pid;
             }
 
+            //clear_buf(log_str, BUFSZ);
+            //sprintf(log_str, "Id: %d\tCommand: %s\n", clients[position].client_id, data);
+            //int count = write(fifo_fd, log_str, strlen(log_str));
+            //assert(count > 0);
+            fprintf(logfile, "Id: %d\tCommand: %s\n", clients[position].client_id, data);
+
             if (starts_with(data, EXIT))  //if command exit in shell
             {
-                printf("id: %d\tDeactivated shell\n", clients[position].client_id);
+                //clear_buf(log_str, BUFSZ);
+                //sprintf(log_str, "id: %d\tDeactivated shell\n", clients[position].client_id);
+                //count = write(fifo_fd, log_str, strlen(log_str));
+                //assert(count > 0);
+                fprintf(logfile, "id: %d\tDeactivated shell\n", clients[position].client_id);
 
                 clients[position].shell = 0;
             }
             else if (starts_with(data, SHELL)) //if command shell
             {
-                printf("id: %d\tStarting shell\n", clients[position].client_id);
+                //clear_buf(log_str, BUFSZ);
+                //sprintf(log_str, "id: %d\tStarting shell\n", clients[position].client_id);
+                //count = write(fifo_fd, log_str, strlen(log_str));
+                //assert(count > 0);
+                fprintf(logfile, "id: %d\tStarting shell\n", clients[position].client_id);
                 clients[position].shell = 1;
             }
 
@@ -265,19 +324,25 @@ int main()
     int shellfd = -1;
     if (pid == 0)
     {
-        dup2(pipe_to_fd, STDOUT_FILENO);
-        dup2(pipe_to_fd, STDERR_FILENO);
+        int ret = dup2(pipe_to_fd, STDOUT_FILENO);
+        if (ret < 0)
+            perror("dup2 in starting subprocess, stdout");
+        ret = dup2(pipe_to_fd, STDERR_FILENO);
+        if (ret < 0)
+            perror("dup2 in starting subprocess, stderr");
         flag = 1;
         while (flag)
         {
             char data[BUFSZ] = {0};
-            read(pipe_from_fd, data, BUFSZ);  //read command from main server
+            ret = read(pipe_from_fd, data, BUFSZ);  //read command from main server
+            if (ret < 0)
+                perror("read in subprocess from main pipe");
             flag = handler(data, &shellfd); //do command
         }
     }
     else //code for main process of server, close server
     {
-        printf("End of server\n");
+        fprintf(logfile, "End of server\n");
         unlink(PATH);
         free(clients);
     }
