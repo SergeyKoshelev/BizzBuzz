@@ -1,60 +1,9 @@
 #include "my_server.h"
 
 #include <arpa/inet.h>
-const int port = 23456;
-const char ip[] = "127.0.0.1";
+const char server_ip[] = "127.0.0.1";
 
-int create_socket()
-{
-    int sk = socket(AF_INET, SOCK_STREAM, 0);
-    if (sk < 0)
-    {
-        perror("Unable to create socket");
-        exit(1);
-    } 
-
-    return sk;
-}
-
-void create_sock_name(struct sockaddr_in* name)
-{
-    name->sin_family = AF_INET;
-    name->sin_port = htons(23456);
-    name->sin_addr.s_addr = inet_addr(ip);
-}
-
-void bind_socket (int sk, struct sockaddr_in name)
-{
-    int ret = bind(sk, (struct sockaddr*)&name, sizeof(name));
-    if (ret < 0)
-    {
-        perror("Unable to bind socket");
-        close(sk);
-        exit(1);
-    }
-}
-
-void listen_socket (int sk, int count)
-{
-    int ret = listen(sk, count);
-    if (ret)
-    {
-        perror("Unable to listen socket");
-        close(sk);
-        exit(1);
-    }
-}
-
-int accept_socket (int sk)
-{
-    int client_sk = accept(sk, NULL, NULL); //if not NULL - get inf about connected client
-    if (client_sk < 0)
-    {
-        perror("Unable to accept");
-        exit(1);
-    }
-    return client_sk;
-}
+#define COUNT_CLIENTS 2
 
 int handler (char* buffer)
 {
@@ -69,8 +18,9 @@ int handler (char* buffer)
     }
     else
     {
-        printf("UNKNOWN COMMAND\n");
-        return 0;
+        printf("UNKNOWN COMMAND:\n(%s)\n", buffer);
+        //return 0;
+        return 1;
     }
     
 }
@@ -82,27 +32,51 @@ int main()
     int sk, ret, flag = 1;
     struct sockaddr_in name = {0};
 
+    struct in_addr addr = {INADDR_ANY}; //for accepting all incoming messages, server_ip become useless
     sk = create_socket();
-    create_sock_name(&name);
+
+    convert_address(server_ip, &addr);
+    create_sock_name(&name, addr);
     bind_socket(sk, name);
-    listen_socket(sk, 20);
+    listen_socket(sk, COUNT_CLIENTS);
+
+    int clients_sk[COUNT_CLIENTS];
+    for (int i = 0; i < COUNT_CLIENTS; i++)
+    {
+        clients_sk[i] = accept_socket(sk);
+    }
+
+    //connect_socket(sk, name);
 
     while(flag)
     {
         char buffer[BUFSZ] = {0};
-        int client_sk = accept_socket(sk);
-
-        ret = read(client_sk, buffer, BUFSZ);
-        if (ret < 0 || ret > BUFSZ)
+        for (int i = 0; i < COUNT_CLIENTS; i++)
         {
-            printf("Unexpected read error or overflow %d\n", ret);
-            exit(1);
-        }
+            ret = recvfrom(clients_sk[i], buffer, BUFSZ, 0, NULL, NULL);
+            if (ret < 0 || ret > BUFSZ)
+            {
+                printf("Unexpected read error or overflow %d\n", ret);
+                exit(1);
+            }
+            printf("%d read: %s\n", i, buffer);
+            buffer[0] = 'a';
 
-        flag = handler(buffer);
-        close(client_sk);
+            ret = send(clients_sk[i], buffer, BUFSZ, 0);
+            printf("ret: %d\n", ret);
+            if (ret < 0)
+            {
+                perror("Unable to write");
+                exit(1);
+            }
+
+            printf("write: %s\nflag %d\n", buffer, flag);
+        }
     }
 
+    close(sk);
+    for (int i = 0; i < COUNT_CLIENTS; i++)
+        close(clients_sk[i]);
     printf("End of server\n");
     unlink(PATH);
 }
