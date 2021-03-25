@@ -1,66 +1,4 @@
-//htonl() for port=htons(10000)  and  ip = htonl(...)
-//inet_addr for convert ip in addr_type
-//my ip INADDR_LOOPBACK
-//use ports > 20000
-#ifndef _UDP_h
-#define _UDP_h
-#define _XOPEN_SOURCE
-#define _GNU_SOURCE
-
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <errno.h>
-#include <sys/wait.h>
-#include <sys/types.h>
-#include <string.h>
-#include <assert.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <stdlib.h>
-#include <termios.h>
-#include <poll.h>
-
-#define PATH "/tmp/mysock"
-#define BUFSZ 256
-#define port 23456
-#define MAX_CLIENTS_COUNT 10
-#define TIMEOUT 100
-
-#define DUMMY_STR "lalala printing smth for otl10"
-
-#define PRINT "print"
-#define EXIT "exit"
-#define CD "cd"
-#define LS "ls"
-#define FINDALL "findall"
-#define SHELL "shell"
-
-const char my_fifo[] = "fifo_log"; 
-const char log_file[] = "log.txt";
-
-#endif
-
-struct client_info {
-    int pid;
-    int client_id;
-    int pipes_from_main[2];
-    int pipes_to_main[2];
-    int shell; //flag if shell activated
-}; typedef struct client_info client_info;
-
-//#define ERR (code) (if (code < 0) {perror("ERROR"); exit(1)})
-
-void clear_buf(char* buffer, int size)
-{
-    for (int i = 0; i < size; i++)
-        buffer[i] = 0;
-}
-
+//UDP function
 //create AF_INET, SOCK_DGRAM socket
 int create_socket()
 {
@@ -74,72 +12,11 @@ int create_socket()
     return sk;
 }
 
-void create_sock_name(struct sockaddr_in* name, struct in_addr addr)
-{
-    name->sin_family = AF_INET;
-    name->sin_port = htons(port);
-    name->sin_addr.s_addr = addr.s_addr;
-}
-
-int convert_address(const char* ip, struct in_addr* addr)
-{
-    int ret = inet_aton(ip, addr);
-    if (ret == 0)
-    {
-        perror("Invalid address");
-        exit(1);
-    }
-    return 1;
-}
-
-void bind_socket (int sk, struct sockaddr_in name)
-{
-    int ret = bind(sk, (struct sockaddr*)&name, sizeof(name));
-    if ((ret < 0) && (errno != EINVAL))
-    {
-        perror("Unable to bind socket");
-        close(sk);
-        exit(1);
-    }
-}
-
-//only size of BUFSZ
-//can be used only to connect for "findall" and for sending command from client
-void send_buf(int sk, struct sockaddr_in* name, char* data)
-{
-    int ret = sendto(sk, data, BUFSZ, 0, (struct sockaddr*)name, sizeof(*name)); //send findall command
-    if (ret < 0)
-    {
-        perror("Unable to write");
-        exit(1);
-    }
-}
-
-//more than BUFSZ size
-void send_data(int sk, struct sockaddr_in* name, char* data, client_info* clients, int position)
-{
-    int not_end = 1, count = 0, ret = 0;
-    int fd = clients[position].pipes_to_main[0];
-    //printf("data: %s\n", data);
-    struct pollfd poll_info = {fd, POLLIN};
-
-    while (ret = poll(&poll_info, 1, 2 * TIMEOUT) != 0) 
-    {
-        clear_buf(data, BUFSZ);
-        ret = read(fd, data, BUFSZ);
-        if (ret < 0)
-            perror("read in send_data");
-
-        //printf("data: %s\n", data);
-        send_buf(sk, name, data);
-    }
-
-    send_buf(sk, name, "");
-}
-
+//UDP function
 //only size of BUFSZ
 //can be used only for receive command in server and for receive "findall" request in client
-int receive_buf(int sk, struct sockaddr_in* name, char* buffer)
+//need only sk, name, buffer as arguments
+int receive_buf(int sk, struct sockaddr_in* name, char* buffer, int client_sk)
 {
     socklen_t fromlen = sizeof(struct sockaddr_in);
     int size = recvfrom(sk, buffer, BUFSZ, 0, (struct sockaddr*)name, &fromlen);
@@ -151,54 +28,94 @@ int receive_buf(int sk, struct sockaddr_in* name, char* buffer)
     return strlen(buffer);
 }
 
-//more than BUFSZ size
-void receive_data(int sk, struct sockaddr_in* name, char* buffer)
+//UDP function
+//only size of BUFSZ
+//can be used only to connect for "findall" and for sending command from client
+//need only sk(write in it), name, data
+void send_buf(int sk, struct sockaddr_in* name, char* data, int client_sk)
 {
-    int not_empty = 1;
-        
-    while (not_empty)
+    int ret = sendto(sk, data, BUFSZ, 0, (struct sockaddr*)name, sizeof(*name)); //send findall command
+    if (ret < 0)
     {
-        clear_buf(buffer, BUFSZ);
-
-        int size = receive_buf(sk, name, buffer);
-        //printf("(%s)\n", buffer);
-        if (size == 0)
-            not_empty = 0;
-        else
-        {
-            int ret = write(STDOUT_FILENO, buffer, size);
-            if (ret < 0)
-                perror("write in receive_data");
-        }
-    }
-}
-
-//check if str starts with substr
-int starts_with(char* str, char* substr)
-{
-    return (!strncmp(str, substr, strlen(substr)));
-}
-
-//open log file
-FILE* open_log_file()
-{
-    FILE* log_file = fopen("log.txt", "a");
-    if (log_file == NULL) 
-    {
-        printf("Can't open logfile\n");
+        perror("Unable to write");
         exit(1);
     }
-
-    return log_file;
 }
 
-void start_daemon()
-{
-    int pid = fork();
+//useless function for UDP (using only for TCP)
+void connect_socket (int sk, struct sockaddr_in name){};
 
-    if (pid != 0) //parent
+//useless function for UDP (using only for TCP)
+void listen_socket (int sk, int count){};
+
+//useless function for UDP (using only for TCP)
+int accept_socket (int sk){};
+
+//UDP function
+//get array of clients_info and cliend_id
+//return [position] in array, set new 1 if new and 0 if old
+int check_clients_info(client_info* clients, int client_id, int* clients_count, int* new)
+{
+    int i = 0;
+    for (i = 0; i < *clients_count; i++)
+        if (clients[i].client_id == client_id) //if such client exists
+        {
+            *new = 0;
+            return i;
+        }
+
+    if (i < MAX_CLIENTS_COUNT)  //if new client and not overload in clients array
     {
-        sleep(1);
-        exit(0);
+        clients[i].client_id = client_id;
+        int ret = pipe(clients[i].pipes_from_main);
+        if (ret < 0)
+            fprintf(logfile, "creating pipes from main to subprocess for new client: %s\n", strerror(errno));
+        ret = pipe(clients[i].pipes_to_main);
+        if (ret < 0)
+            fprintf(logfile, "creating pipes to main from subprocess for new client: %s\n", strerror(errno));
+        clients[i].shell = 0;
+        *clients_count += 1;
+        *new = 1;
+        return i;
+    }
+}
+
+//disconnect server, closes pipes and replace cell of client 
+int client_disconnect(client_info* clients, int position, int* clients_count)
+{
+    //clear_buf(log_str, BUFSZ);
+    //sprintf(log_str, "id: %d\tDisconnected\n", clients[position].client_id);
+    //int count = write(fifo_fd, log_str, strlen(log_str));
+    //assert(count > 0);
+    fprintf(logfile, "id: %d\tDisconnected\n", clients[position].client_id);
+
+    int ret = kill(clients[position].pid, SIGKILL);
+    if (ret < 0)
+        fprintf(logfile, "kill in client disconnect: %s\n", strerror(errno));
+    clients[position].client_id = 0;
+    ret = close(clients[position].pipes_from_main[0]); //close input in pipe
+    if (ret < 0)
+        fprintf(logfile, "close pipe from main, 0 in client disconnecting: %s\n", strerror(errno));
+	ret = close(clients[position].pipes_from_main[1]); //close output from pipe
+    if (ret < 0)
+        fprintf(logfile, "close pipe from main, 1 in client disconnecting: %s\n", strerror(errno));
+    ret = close(clients[position].pipes_to_main[0]); //close input in pipe
+    if (ret < 0)
+        fprintf(logfile, "close pipe to main, 0 in client disconnecting: %s\n", strerror(errno));
+	ret = close(clients[position].pipes_to_main[1]); //close output from pipe
+    if (ret < 0)
+        fprintf(logfile, "close pipe to main, 1 in client disconnecting: %s\n", strerror(errno));
+    *clients_count -= 1;
+    //printf("count: %d\t position: %d\n", *clients_count, position);
+    if (*clients_count != position) //not last elem of array, move last elem to empty cell
+    {
+        clients[position].client_id = clients[*clients_count].client_id;
+        clients[position].pipes_from_main[0] = clients[*clients_count].pipes_from_main[0];
+        clients[position].pipes_from_main[1]= clients[*clients_count].pipes_from_main[1];
+        clients[position].pipes_to_main[0] = clients[*clients_count].pipes_to_main[0];
+        clients[position].pipes_to_main[1]= clients[*clients_count].pipes_to_main[1];
+        clients[position].pid = clients[*clients_count].pid;
+
+        clients[*clients_count].client_id = 0;
     }
 }
