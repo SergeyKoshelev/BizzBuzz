@@ -40,43 +40,35 @@ int main()
     bind_socket(sk, name);
     listen_socket(sk, COUNT_CLIENTS);
 
-    int clients_sk[COUNT_CLIENTS];
-    for (int i = 0; i < COUNT_CLIENTS; i++)
-    {
-        clients_sk[i] = accept_socket(sk);
-    }
-
-    //connect_socket(sk, name);
+    int client_sk = 0;
 
     while(flag)
     {
+        client_sk = accept_socket(sk);
         char buffer[BUFSZ] = {0};
-        for (int i = 0; i < COUNT_CLIENTS; i++)
+        ret = recvfrom(client_sk, buffer, BUFSZ, 0, NULL, NULL);
+        if (ret < 0 || ret > BUFSZ)
         {
-            ret = recvfrom(clients_sk[i], buffer, BUFSZ, 0, NULL, NULL);
-            if (ret < 0 || ret > BUFSZ)
-            {
-                printf("Unexpected read error or overflow %d\n", ret);
-                exit(1);
-            }
-            printf("%d read: %s\n", i, buffer);
-            buffer[0] = 'a';
-
-            ret = send(clients_sk[i], buffer, BUFSZ, 0);
-            printf("ret: %d\n", ret);
-            if (ret < 0)
-            {
-                perror("Unable to write");
-                exit(1);
-            }
-
-            printf("write: %s\nflag %d\n", buffer, flag);
+            printf("Unexpected read error or overflow %d\n", ret);
+            exit(1);
         }
+        printf("read: %s\n", buffer);
+        buffer[0] = 'a';
+
+        ret = send(client_sk, buffer, BUFSZ, 0);
+        printf("ret: %d\n", ret);
+        if (ret < 0)
+        {
+            perror("Unable to write");
+            exit(1);
+        }
+
+        printf("write: %s\t\n", buffer);
+        //close(client_sk);
     }
+    
 
     close(sk);
-    for (int i = 0; i < COUNT_CLIENTS; i++)
-        close(clients_sk[i]);
     printf("End of server\n");
     unlink(PATH);
 }

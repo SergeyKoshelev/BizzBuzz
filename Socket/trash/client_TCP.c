@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
 
         printf("response: %s\n", buffer);
 
-        flag = 0;
+        //flag = 0;
     }
     
     close(sk);
