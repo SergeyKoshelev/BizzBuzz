@@ -1,0 +1,22 @@
+
+Start server with pid: 9479
+Choose UDP protocol
+id: 9480	Connected
+Id: 9480	Command: ls
+Id: 9480	Command: shell
+id: 9480	Starting shell
+Id: 9480	Command: ls
+Id: 9480	Command: cd /bin
+Id: 9480	Command: ls
+Id: 9480	Command: exit
+id: 9480	Deactivated shell
+Id: 9480	Command: cd /bin
+Id: 9480	Command: ls
+id: 9480	Disconnected
+
+Start server with pid: 9754
+Choose UDP protocol
+id: 9763	Connected
+Id: 9763	Command: cd /bin
+Id: 9763	Command: ls
+id: 9763	Disconnected

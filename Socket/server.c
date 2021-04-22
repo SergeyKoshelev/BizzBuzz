@@ -5,19 +5,6 @@ const char server_ip[] = "127.0.0.1";
 char log_str[BUFSZ];
 
 FILE* logfile = NULL;
-int fifo_fd = -1;
-
-//separate received buffer on id and data
-//returns id, data in variable data
-int separate_buffer(char * buffer, char* data) 
-{
-    char* space = strchr(buffer, ' ');
-    *space = '\0';
-    int client_id = atoi(buffer);
-    strcpy(data, space + 1);
-    //printf("(%d) (%s)\n", client_id, data);
-    return client_id;
-}
 
 //start shell, create fd
 void start_shell(int* shellfd)
@@ -97,6 +84,7 @@ int handler (char* buffer, int* shellfd)
     if (starts_with(buffer, PRINT))
     {
         printf("%s\n", buffer + sizeof(PRINT));
+        //send_buf(sk, name, buffer+sizeof(PRINT), -1);
         return 1;
     }
     else if (starts_with(buffer, LS))
@@ -140,16 +128,9 @@ int handler (char* buffer, int* shellfd)
     
 }
 
-//delegate work to subprocess using pipes (just write request in pipe)
-int delegate(client_info* clients, int position, char* data, int fifo_fd)
+int main(int argc, char** argv)
 {
-    int ret = write(clients[position].pipes_from_main[1], data, strlen(data));
-    if (ret < 0)
-        fprintf(logfile, "write in pipe to subprocess: %s\n", strerror(errno));
-}
-
-int main()
-{
+    assert(argc > 1);
     start_daemon();
     logfile = stdout;
     int main_pid = getpid();
@@ -160,8 +141,28 @@ int main()
     printf("Start server with pid: %d\n", main_pid);
     unlink(PATH);
     
+    void* sl = choose_protocol(argv[1], logfile);
+    int (*create_socket)();
+    void (*listen_socket)(int sk, int count);
+    int (*master)(int sk, struct sockaddr_in* name, 
+           char* buffer, char* data, client_info* clients, 
+           int* clients_count, int* pipe_from_fd, 
+           int* client_sk, FILE* logfile);
+    int (*slave)(int sk, struct sockaddr_in* name, 
+          int pipe_from_fd, int client_sk,
+          int (*handler)(char* buffer, int* shellfd),
+          void (*shell_start)(int* shellfd),
+          void (*send_buf)(int sk, struct sockaddr_in* name, char* data, int client_sk));
+    int (*receive_buf)(int sk, struct sockaddr_in* name, char* buffer, int client_sk);
+    void (*send_buf)(int sk, struct sockaddr_in* name, char* data, int client_sk);
+    *(void **) (&create_socket) = dlsym(sl, "create_socket");
+    *(void **) (&listen_socket) = dlsym(sl, "listen_socket");
+    *(void **) (&master) = dlsym(sl, "master");
+    *(void **) (&slave) = dlsym(sl, "slave");
+    *(void **) (&receive_buf) = dlsym(sl, "receive_buf");
+    *(void **) (&send_buf) = dlsym(sl, "send_buf");
 
-    int sk, ret, flag = 1, clients_count = 0, new = 0, pipe_to_fd, pipe_from_fd, position, count;
+    int sk, ret, flag = 1, clients_count = 0, new = 0, pipe_from_fd, count, client_sk;
     struct sockaddr_in name = {0};
     
     client_info* clients = (client_info*)malloc(MAX_CLIENTS_COUNT * sizeof(client_info));
@@ -174,83 +175,20 @@ int main()
     create_sock_name(&name, addr);
     bind_socket(sk, name);
     listen_socket(sk, 20);
-    int client_sk = accept_socket(sk);
 
-    while (1)
+    while (flag)
     {
         char data[BUFSZ] = {0};
         char buffer[BUFSZ] = {0};
         if ((logfile != stdout) && (logfile != NULL))
             fclose(logfile);
 
-        receive_buf(sk, &name, buffer, client_sk);
-        logfile = open_log_file();
-
-        int client_id = separate_buffer(buffer, data);
-        //printf("id: %d\tdata:(%s)\n", client_id, data);
-        position = check_clients_info(clients, client_id, &clients_count, &flag);
-    
-        if (starts_with(data, FINDALL)) //if command findall
+        flag = (*master)(sk, &name, buffer, data, clients, &clients_count, &pipe_from_fd, &client_sk, logfile);
+        if (flag == -1) //child want to escape
         {
-            fprintf(logfile, "FINDALL\n");
-            send_buf(sk, &name, "server", client_sk);
-        }
-        else if ((flag == 1) && (starts_with(data, EXIT)))  //if new client and command exit
-            continue; //ignore it
-        else if (starts_with(data, EXIT) && (clients[position].shell == 0))  //if command exit and server's part not in shell
-            client_disconnect(clients, position, &clients_count);
-        else 
-        {
-            delegate(clients, position, data, fifo_fd);
-
-            if (flag == 1) //if new client
-            {
-                pipe_from_fd = clients[position].pipes_from_main[0];
-                pipe_to_fd = clients[position].pipes_to_main[1];
-                pid = fork();
-                if (pid == 0) //child
-                {
-                    free(clients);
-                    break;
-                }
-                
-                //clear_buf(log_str, BUFSZ);
-                //sprintf(log_str, "id: %d\tConnected\n", clients[position].client_id);
-                //count = write(fifo_fd, log_str, strlen(log_str));
-                //assert(count > 0);
-                fprintf(logfile, "id: %d\tConnected\n", clients[position].client_id);   //stdout can't be replaced!?!?!?!?!
-                clients[position].pid = pid;
-            }
-
-            //clear_buf(log_str, BUFSZ);
-            //sprintf(log_str, "Id: %d\tCommand: %s\n", clients[position].client_id, data);
-            //int count = write(fifo_fd, log_str, strlen(log_str));
-            //assert(count > 0);
-            fprintf(logfile, "Id: %d\tCommand: %s\n", clients[position].client_id, data);
-
-            if (starts_with(data, EXIT))  //if command exit in shell
-            {
-                //clear_buf(log_str, BUFSZ);
-                //sprintf(log_str, "id: %d\tDeactivated shell\n", clients[position].client_id);
-                //count = write(fifo_fd, log_str, strlen(log_str));
-                //assert(count > 0);
-                fprintf(logfile, "id: %d\tDeactivated shell\n", clients[position].client_id);
-
-                clients[position].shell = 0;
-            }
-            else if (starts_with(data, SHELL)) //if command shell
-            {
-                //clear_buf(log_str, BUFSZ);
-                //sprintf(log_str, "id: %d\tStarting shell\n", clients[position].client_id);
-                //count = write(fifo_fd, log_str, strlen(log_str));
-                //assert(count > 0);
-                fprintf(logfile, "id: %d\tStarting shell\n", clients[position].client_id);
-                clients[position].shell = 1;
-            }
-
-            send_data(sk, &name, data, clients, position, client_sk);
+            pid = 0;
+            break;
         } 
-      
     }
 
 
@@ -258,21 +196,9 @@ int main()
     int shellfd = -1;
     if (pid == 0)
     {
-        int ret = dup2(pipe_to_fd, STDOUT_FILENO);
-        if (ret < 0)
-            perror("dup2 in starting subprocess, stdout");
-        ret = dup2(pipe_to_fd, STDERR_FILENO);
-        if (ret < 0)
-            perror("dup2 in starting subprocess, stderr");
-        flag = 1;
-        while (flag)
-        {
-            char data[BUFSZ] = {0};
-            ret = read(pipe_from_fd, data, BUFSZ);  //read command from main server
-            if (ret < 0)
-                perror("read in subprocess from main pipe");
-            flag = handler(data, &shellfd); //do command
-        }
+        int (*handler_p)(char* buffer, int* shellfd) = handler;
+        void (*start_shell_p)(int* shellfd) = start_shell;
+        (*slave)(sk, &name, pipe_from_fd, client_sk, handler_p, start_shell_p, send_buf);
     }
     else //code for main process of server, close server
     {

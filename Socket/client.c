@@ -31,13 +31,24 @@ int get_str(char* buffer, struct sockaddr_in* name)
 
 int main(int argc, char** argv) {
 
-    assert(argc > 1);
+    assert(argc > 2);
     struct sockaddr_in name = {0};
     struct in_addr addr = {0};
     int sk, ret, flag = 1, shell = 0;
     char buffer[BUFSZ] = {0};
+    FILE* logfile = stdout;
+
+    void* sl = choose_protocol(argv[1], NULL);
+    int (*create_socket)();
+    int (*receive_buf)(int sk, struct sockaddr_in* name, char* buffer, int client_sk);
+    void (*send_buf)(int sk, struct sockaddr_in* name, char* data, int client_sk);
+    void (*connect_socket) (int sk, struct sockaddr_in name);
+    *(void **) (&create_socket) = dlsym(sl, "create_socket");
+    *(void **) (&receive_buf) = dlsym(sl, "receive_buf");
+    *(void **) (&send_buf) = dlsym(sl, "send_buf");
+    *(void **) (&connect_socket) = dlsym(sl, "connect_socket");
     
-    convert_address(argv[1], &addr);
+    convert_address(argv[2], &addr);
     create_sock_name(&name, addr);
     sk = create_socket();
     connect_socket(sk, name); 
@@ -72,7 +83,7 @@ int main(int argc, char** argv) {
                 name.sin_port = 0;
                 bind_socket(sk, name);  //bind to rec message back
                 printf("response on request:\n");
-                receive_data(sk, &name, buffer, sk);
+                receive_data(sk, &name, buffer, sk, receive_buf);
             }
         }
         else if (flag == -1) //findall command
