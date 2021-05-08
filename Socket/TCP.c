@@ -1,6 +1,8 @@
 #include "lib.h"
 #include "log.h"
 
+int* shellfd_p = NULL;
+
 //TCP function
 //create AF_INET, SOCK_DGRAM socket
 int create_socket()
@@ -22,7 +24,6 @@ int receive_buf(int sk, struct sockaddr_in* name, char* buffer)
         return -1;
     }
     decode(buffer);
-    //log_info("rec:\n%s", buffer);
     return strlen(buffer); //because size is usually BUFSZ - 1
 }
 
@@ -32,14 +33,12 @@ int receive_buf(int sk, struct sockaddr_in* name, char* buffer)
 //need only client_sk(write in it) and data
 int send_buf(int sk, struct sockaddr_in* name, char* data)
 {
-    //log_info("send:\n%s", data);
     encode(data);
     int size = send(sk, data, BUFSZ, 0);
     if (size < 0){
         log_err("Unable to write");
         return -1;
     }
-
     return size;
 }
 
@@ -62,16 +61,25 @@ int accept_socket (int sk)
     return client_sk;
 }
 
+//sigchld handler for slave
+void sigchld_slave(int signal){
+    //log_info("Received sigchld in slave");
+    if (*shellfd_p > 0){
+        log_info("Shell deactivated");
+        *shellfd_p = -1;
+    }
+}
+
 //slave for TCP
 int slave(int client_sk, struct sockaddr_in* name, 
           int (*handler)(char* buffer, int* shellfd))
 {
+    signal(SIGCHLD, sigchld_slave);
+    log_init("server.log");
     int buf_pipe[2];
     pipe(buf_pipe);
-
-    int shellfd = -1, command;
-
-    log_init("server.log");
+    int shellfd = -1, command, flag = 1;
+    shellfd_p = &shellfd;
     int ret = dup2(buf_pipe[1], STDOUT_FILENO);
     if (ret < 0)
         log_err("dup2 in starting subprocess, stdout");
@@ -79,18 +87,14 @@ int slave(int client_sk, struct sockaddr_in* name,
     if (ret < 0)
         log_err("dup2 in starting subprocess, stderr");
 
-    int flag = 1;
     while (flag)
     {
-        char data[BUFSZ] = {0};
-        char buffer[BUFSZ] = {0};
+        char data[BUFSZ] = {0}, buffer[BUFSZ] = {0};
         ret = receive_buf(client_sk, NULL, buffer);      
         if (ret <= 0)
-            continue;
-            
+            continue;    
         int client_id = separate_buffer(buffer, data);
         log_info("Id: %d\t Command: %s", client_id, data);
-
         command = get_command(data);
         switch (command){
             case findall:
@@ -110,12 +114,12 @@ int master(int sk, struct sockaddr_in* name,
            int (*handler)(char* buffer, int* shellfd))
 {
     int flag = 1;
-
     while (flag){
         int client_sk = accept_socket(sk);
         if (client_sk > 0){
             int pid = fork();
             if (pid == 0){
+                log_init("server.log");
                 slave(client_sk, name, handler);
                 return 0;
             }

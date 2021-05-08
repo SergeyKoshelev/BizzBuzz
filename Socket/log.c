@@ -10,7 +10,7 @@ int log_init(char * path)
         logfile = open(path, O_WRONLY | O_CREAT | O_APPEND, 0666);
 
     if (logfile < 0) {
-        perror("opening log file");
+        perror("opening log file, can't start log");
         return -1;
     }
     return 0;

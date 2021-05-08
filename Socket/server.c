@@ -12,9 +12,7 @@ int start_shell(int* shellfd)
         log_err("Open fd in start shell");
         return -1;
     }
-    
     *shellfd = fd;
-
     if (grantpt(fd) < 0){
         log_err("grantpt");
         return -1;
@@ -39,6 +37,7 @@ int start_shell(int* shellfd)
         //perror("tcsetattr");
     int pid = fork();
     if (pid == 0) {
+        log_info("bash pid: %d", getpid());
         if (dup2(res_fd, STDIN_FILENO) < 0){
             log_err("dup2 res_fd stdin");
             return -1;
@@ -60,48 +59,48 @@ int start_shell(int* shellfd)
         exit(1);
     }
 
-    // char trash_buf[BUFSZ];
-    //read(*shellfd, trash_buf, BUFSZ);
     return 1;
 }
 
-//doing command from buffer
-//fuction for subproccess 
-int handler (char* buffer, int* shellfd)
+//handler if bash is executing
+int bash_handler (char* buffer, int* shellfd, int command)
 {
     int ret;
     struct pollfd poll_info;
-    int command = get_command(buffer);  
-    if (*shellfd > 0)  //if shell is activated
+    if (command == quit)
     {
-        //buffer[strlen(buffer)] = '\n';
-        //printf("(%s)", buffer);
+        ret = write(*shellfd, "exit\n", strlen("exit\n"));  //close all bashes
+        if (ret < 0){
+            log_err("Cant write to shell");
+            return -1;
+        }
+        printf("Quit from slave process\n");
+        return 0;
+    }
+    else
+    {
+        log_info("(%s)", buffer);
         ret = write(*shellfd, buffer, strlen(buffer));
         if (ret < 0){
             log_err("Cant write to shell");
             return -1;
         }
-
-        switch (command) {
-            case exit_com:
-                *shellfd = -1;
-                printf("Shell deactivated\n");
-                break;
-            default:
-                poll_info = (struct pollfd){*shellfd, POLLIN};
-                while ((ret = poll(&poll_info, 1, TIMEOUT)) > 0) {
-                    clear_buf(buffer, BUFSZ);
-                    ret = read(*shellfd, buffer, BUFSZ);
-                    if (ret < 0)
-                        log_err("read from shellfd");
-        
-                    printf("%s", buffer);
-                }
+        poll_info = (struct pollfd){*shellfd, POLLIN};
+        while ((ret = poll(&poll_info, 1, TIMEOUT)) > 0) {
+            clear_buf(buffer, BUFSZ);
+            ret = read(*shellfd, buffer, BUFSZ);
+            if (ret < 0)
+                log_err("read from shellfd");
+                printf("%s", buffer);
         }
         return 1;
     }
+}
 
-    //if shell if not activated
+//handler if bash is not executing
+int usual_handler(char* buffer, int* shellfd, int command)
+{
+    int ret;
     switch (command){
         case print:{
             printf("%s\n", buffer + sizeof(PRINT));
@@ -137,8 +136,8 @@ int handler (char* buffer, int* shellfd)
             }
             return 1;
         }
-        case exit_com:{
-            printf("Exit from slave process\n");
+        case quit:{
+            printf("Quit from slave process\n");
             return 0;
         }
         default:{
@@ -148,8 +147,18 @@ int handler (char* buffer, int* shellfd)
     }
 }
 
-int main(int argc, char** argv)
+//doing command from buffer
+//fuction for subproccess 
+int handler (char* buffer, int* shellfd)
 {
+    int command = get_command(buffer);  
+    if (*shellfd > 0)
+        return bash_handler(buffer, shellfd, command);
+    else
+        return usual_handler(buffer, shellfd, command); 
+  }
+
+int main(int argc, char** argv){
     if (argc < 2){
         printf("Not enough arguments. Should be ./server [protocol]\n");
         return -1;
@@ -157,36 +166,24 @@ int main(int argc, char** argv)
     start_daemon();
     int main_pid = getpid();
     int pid = main_pid;
-
-    int ret = log_init("server.log");
-    if (ret < 0)
-        printf("Can't start log in logfile\n");
-    
+    log_init("server.log");
     log_info("Start server with pid: %d", main_pid);
     printf("Start server with pid: %d\n", main_pid);
-    unlink(PATH);
-    
-    void* sl = choose_protocol(argv[1]);
-    if (sl == NULL){
-        log_err("Bad shared library pointer");
-        return -1;
+    functions functions = get_functions(argv[1]);
+    if (functions.success == error){
+        log_err("error with getting shared library functions");
+        return -1;             
     }
-    int (*create_socket)() = dlsym(sl, "create_socket");
-    int (*listen_socket)(int sk, int count) = dlsym(sl, "listen_socket");
-    int (*master)(int sk, struct sockaddr_in* name,  
-                  int (*handler)(char* buffer, int* shellfd)) = dlsym(sl, "master");;
 
-    int sk, flag = 1;
+    int sk, flag = 1, ret;
     struct sockaddr_in name = {0};
-
     struct in_addr addr = {INADDR_ANY}; //for accepting all incoming messages, server_ip become useless
     //convert_address(server_ip, &addr); //how to save from INADDR_ANY?
-    sk = create_socket();
+    sk = functions.create_socket();
     if (sk < 0){
         log_err("Can't create socket");
         return -1;
     }
-
     create_sock_name(&name, addr);
     ret = bind_socket(sk, name);
     if (ret < 0){
@@ -194,24 +191,21 @@ int main(int argc, char** argv)
         close(sk);
         return -1;
     }
-    ret = listen_socket(sk, 20);
+    ret = functions.listen_socket(sk, 20);
     if (ret < 0){
         log_err("Unable to listen socket");
         close(sk);
         return -1;
     }
-
     ret = setsockopt(sk, SOL_SOCKET, SO_REUSEPORT, &(int){1}, sizeof(int));
     if (ret < 0)
-        log_err("setsockopt can't change mode");
+        log_err("setsockopt can't change mode reuseport");
     ret = setsockopt(sk, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int));
     if (ret < 0)
-        log_err("setsockopt can't change mode");
+        log_err("setsockopt can't change mode reuseaddr");
 
-    flag = master(sk, &name, handler);
-
-    if ((pid = getpid()) == main_pid)
-    {
+    flag = functions.master(sk, &name, handler);
+    if ((pid = getpid()) == main_pid){
         log_info("End of server master");
         killpg(0, SIGINT);
     }

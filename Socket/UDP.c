@@ -1,7 +1,9 @@
 #include "lib.h"
 #include "log.h"
 
-int sigchld_received = 0;
+client_info clients[MAX_CLIENTS_COUNT];
+int clients_count = 0;
+int* shellfd_p = NULL;
 
 //UDP function
 //create AF_INET, SOCK_DGRAM socket
@@ -57,7 +59,7 @@ int listen_socket (int sk, int count){ return 0; };
 
 //try to find client in array of clients
 //return position of found; else -1
-int find_client(client_info* clients, int client_id, int clients_count)
+int find_client(int client_id)
 {
     for (int i = 0; i < clients_count; i++)
         if (clients[i].client_id == client_id)
@@ -66,45 +68,35 @@ int find_client(client_info* clients, int client_id, int clients_count)
 }
 
 //add new client in array
-int add_client(client_info* clients, int client_id, int clients_count)
+int add_client(int client_id)
 {
     if (clients_count >= MAX_CLIENTS_COUNT)
         return -1;
 
     clients[clients_count].client_id = client_id;
-    int ret = pipe(clients[clients_count].pipes_from_main);
+    int ret = pipe(clients[clients_count].pipes_from_master);
     if (ret < 0){
         log_err("creating pipes from main to subprocess for new client: %s", strerror(errno));
         return -1;
     }
-    clients[clients_count].shell = 0;
     return clients_count;
 }
 
 //disconnect server, closes pipes and replace cell of client 
-int client_disconnect(client_info* clients, int position, int* clients_count)
+int client_disconnect(int position)
 {
-    while (!sigchld_received);
-    sigchld_received = 0;
     clients[position].client_id = 0;
-    int ret = close(clients[position].pipes_from_main[0]); //close input in pipe
+    int ret = close(clients[position].pipes_from_master[0]); //close input in pipe
     if (ret < 0)
         log_err("close pipe from main, 0 in client disconnecting: %s", strerror(errno));
-	ret = close(clients[position].pipes_from_main[1]); //close output from pipe
+	ret = close(clients[position].pipes_from_master[1]); //close output from pipe
     if (ret < 0)
         log_err("close pipe from main, 1 in client disconnecting: %s", strerror(errno));
-    *clients_count -= 1;
-    if (*clients_count != position) //not last elem of array, move last elem to empty cell
-    {
-        memcpy(clients + position, clients + *clients_count, sizeof(client_info));
-        clients[*clients_count].client_id = 0;
+    clients_count -= 1;
+    if (clients_count != position){ //not last elem of array, move last elem to empty cell
+        memcpy(clients + position, clients + clients_count, sizeof(client_info));
+        clients[clients_count].client_id = 0;
     }
-}
-
-//if sigchild received set flag = 1
-void childsignal(int signal)
-{
-    sigchld_received = 1;
 }
 
 //if sigint received from master
@@ -114,17 +106,26 @@ void slave_end(int signal)
     exit(0);
 }
 
-//ingore function for signal()
-void ignore(int signal){}
+//sigchld handler for slave
+void sigchld_slave(int signal){
+    //log_info("Received sigchld in slave");
+    if (*shellfd_p > 0){
+        log_info("Shell deactivated");
+        *shellfd_p = -1;
+    }
+}
 
 //slave for UDP
 int slave(int sk, struct sockaddr_in* name, int pipe_from_master, 
           int (*handler)(char* buffer, int* shellfd))
 {
+    signal(SIGCHLD, sigchld_slave);
+    signal(SIGINT, slave_end);
+    log_init("server.log");
     int buf_pipe[2];
     pipe(buf_pipe);
-
     int shellfd = -1;
+    shellfd_p = &shellfd;
 
     int ret = dup2(buf_pipe[1], STDOUT_FILENO);
     if (ret < 0)
@@ -152,41 +153,28 @@ int master(int sk, struct sockaddr_in* name,
            int (*handler)(char* buffer, int* shellfd))
 {
     int pipe_from_master = 0;
-    char data[BUFSZ] = {0};
-    char buffer[BUFSZ] = {0};
-    client_info* clients = (client_info*)malloc(MAX_CLIENTS_COUNT * sizeof(client_info));
-    int flag = 1, clients_count = 0, ret, position, command;
-
-    signal(SIGCHLD, childsignal);
-
+    char data[BUFSZ] = {0}, buffer[BUFSZ] = {0};
+    int flag = 1, ret, position, command;
     while (flag){
         receive_buf(sk, name, buffer);
-
         int client_id = separate_buffer(buffer, data);
-        position = find_client(clients, client_id, clients_count);
+        position = find_client(client_id);
         if (position < 0){
-            ret = add_client(clients, client_id, clients_count);
+            ret = add_client(client_id);
             if (ret < 0)
                 continue;
-
             position = clients_count;
             clients_count++;
-
-            pipe_from_master = clients[position].pipes_from_main[0];
+            pipe_from_master = clients[position].pipes_from_master[0];
             int pid = fork();
             if (pid == 0){
-                free(clients);
-                signal(SIGCHLD, ignore);
-                signal(SIGINT, slave_end);
                 slave(sk, name, pipe_from_master, handler);
                 return 0;
             }
-                    
             log_init("server.log");
             log_info("id: %d\tConnected", clients[position].client_id); 
             clients[position].pid = pid;
         }
-    
         command = get_command(data);
         switch (command){
             case findall:
@@ -195,33 +183,17 @@ int master(int sk, struct sockaddr_in* name,
                 send_buf(sk, name, data);
                 continue;
             default:
-                ret = write(clients[position].pipes_from_main[1], data, strlen(data));
+                ret = write(clients[position].pipes_from_master[1], data, strlen(data));
                 if (ret < 0){
                     log_err("write in pipe to subprocess: %s", strerror(errno));
                     continue;
                 }
         }
-
-        switch (command){
-            case exit_com:
-                if (clients[position].shell){
-                    clients[position].shell = 0;
-                    log_info("id: %d\tDeactivated shell", clients[position].client_id);
-                }
-                else{
-                    log_info("id: %d\tClient disconnected", clients[position].client_id);
-                    client_disconnect(clients, position, &clients_count);  //pipes will be killed before ending of slave
-                }
-                break;
-            case shell:
-                clients[position].shell = 1;
-                log_info("id: %d\tStarting shell", clients[position].client_id);
-                break;
-            default:
-                log_info("Id: %d\tCommand: %s", clients[position].client_id, data);
+        log_info("Id: %d\tCommand: %s", clients[position].client_id, data);
+        if (command == quit){
+            log_info("Client disconnecting, id: %d", clients[position].client_id);
+            client_disconnect(position);
         }
     }
-
-    free(clients);
     return 1;
 }

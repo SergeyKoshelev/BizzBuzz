@@ -39,7 +39,6 @@ void send_data(int sk, struct sockaddr_in* name,
                int (*send_buf)(int sk, struct sockaddr_in* name, char* data))
 {
     int ret = 0;
-    //printf("data: %s\n", data);
     struct pollfd poll_info = {fd, POLLIN};
 
     while ((ret = poll(&poll_info, 1, 2 * TIMEOUT)) > 0) {
@@ -49,8 +48,6 @@ void send_data(int sk, struct sockaddr_in* name,
             log_err("read from fd in send_data");
             continue;
         }
-
-        //printf("data: %s\n", data);
         send_buf(sk, name, data);
     }
 }
@@ -62,11 +59,7 @@ void receive_data(int sk, struct sockaddr_in* name, char* buffer,
     while (size)
     {
         clear_buf(buffer, BUFSZ);
-
         size = receive_buf(sk, name, buffer);
-        //printf("0: (%c)\t", buffer[0]);
-        //printf("last: (%c)\n", buffer[size - 1]);
-        //printf("(%s)\n", buffer);
         if (size > 0)
         {
             ret = write(STDOUT_FILENO, buffer, size);
@@ -81,63 +74,53 @@ int starts_with(char* str, char* substr)
     return (!strncmp(str, substr, strlen(substr)));
 }
 
-//start daemon (doesn't write daemon's pid)
 void start_daemon()
 {
-    /*
-    int pid = fork();
-    if (pid < 0)
-        exit(-1);
-    
-    if (pid > 0) //parent
-    {
-        sleep(1);
-        exit(0);
-    }
-    
-    if (setsid() < 0)
-        exit(-1);
-    
-    signal(...);
-
-    pid = fork();
-    if (pid < 0)
-        exit(-1);
-    
-    if (pid > 0) //parent
-    {
-        sleep(1);
-        exit(0);
-    }
-
-    umask(...);
-    chdir(...);
-    
-    int fd;
-    for (fd = sysconf(_SC_OPEN_MAX); fd >=0; fd--)
-        close(fd);log_info("%s", buffer);
-
-    */
     daemon(1, 1);
 }
 
 void* choose_protocol(char* type)
 {
-    if (starts_with(type, UDP)) 
-    {
+    if (starts_with(type, UDP)) {
         log_info("Choose UDP protocol");
         return dlopen("./lib_UDP.so", RTLD_LAZY);
     }
-    else if (starts_with(type, TCP))
-    {
+    else if (starts_with(type, TCP)){
         log_info("Choose TCP protocol");
         return dlopen("./lib_TCP.so", RTLD_LAZY);
     }
-    else 
-    {
-        perror("argument should be tcp or udp");
+    else {
+        log_err("argument should be tcp or udp");
         return NULL;
     }
+}
+
+functions get_functions(char* type)
+{
+    functions functions;
+    functions.success = 1;
+    void* sl = choose_protocol(type);
+    if (sl == NULL){
+        log_err("Bad shared library pointer");
+        functions.success = error;
+        return functions;
+    }
+    functions.create_socket = dlsym(sl, "create_socket");
+    functions.listen_socket = dlsym(sl, "listen_socket");
+    functions.master = dlsym(sl, "master");
+    functions.receive_buf = dlsym(sl, "receive_buf");
+    functions.send_buf = dlsym(sl, "send_buf");
+    functions.connect_socket = dlsym(sl, "connect_socket");
+    if ((functions.create_socket == NULL)||(functions.listen_socket == NULL)||
+        (functions.send_buf == NULL)||(functions.master == NULL)||
+        (functions.receive_buf == NULL)||(functions.connect_socket == NULL)){
+        log_err("functions not found:\ncreate_socket: %p\nlisten_socket: %p\nconnect_socket: %p", 
+        functions.create_socket, functions.listen_socket, functions.connect_socket);
+        log_err("send_buf: %p\nmaster: %p\nreceive_buf: %p", 
+        functions.send_buf, functions.master, functions.receive_buf);
+        functions.success = error;
+    }
+    return functions;
 }
 
 int separate_buffer(char * buffer, char* data) 
@@ -176,6 +159,8 @@ int get_command(char* buffer)
         return findall;
     else if (starts_with(buffer, SHELL))
         return shell;
+    else if (starts_with(buffer, QUIT))
+        return quit;
     else 
         return unknown;
 }

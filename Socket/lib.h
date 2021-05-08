@@ -39,6 +39,7 @@
 #define SHELL "shell"
 #define UDP "udp"
 #define TCP "tcp"
+#define QUIT "quit"
 
 enum Commands {
     error = -1,
@@ -48,17 +49,26 @@ enum Commands {
     cd = 3,
     ls = 4,
     findall = 5,
-    shell = 6
+    shell = 6, 
+    quit = 7
 };
 
 struct client_info {
     int pid;
     int client_id;
-    int pipes_from_main[2];
-    int pipes_to_main[2];
-    int shell; //flag if shell activated
-    int client_sk; //client sk for tcp
+    int pipes_from_master[2];
 }; typedef struct client_info client_info;
+
+struct functions {
+    int success;
+    int (*create_socket)();
+    int (*listen_socket)(int sk, int count);
+    int (*master)(int sk, struct sockaddr_in* name,  
+                  int (*handler)(char* buffer, int* shellfd));
+    int (*receive_buf)(int sk, struct sockaddr_in* name, char* buffer);
+    int (*send_buf)(int sk, struct sockaddr_in* name, char* data);
+    int (*connect_socket) (int sk, struct sockaddr_in name);
+}; typedef struct functions functions;
 
 //set all cells in '\0'
 void clear_buf(char* buffer, int size);
@@ -91,6 +101,9 @@ void start_daemon();
 
 //choose UDP or TCP protocol
 void* choose_protocol(char* type);
+
+//get structure of functions from shared library
+functions get_functions(char* type);
 
 //separate received buffer on id and data
 //returns id, data in variable data
